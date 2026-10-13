@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Vamber AI — UI Context",
   "short_name": "Vamber AI",
-  "version": "1.4.8",
+  "version": "1.5.0",
   "description": "Inspect a webpage element and copy compact, AI-ready context.",
   "author": "Vamber AI",
   "permissions": [

@@ -38,13 +38,84 @@
     return segment;
   }
 
+  function isLandmark(element) {
+    if (!element || element.tagName === "BODY" || element.tagName === "HTML") return false;
+    if (element.id) return true;
+    const tag = element.tagName.toLowerCase();
+    return ["header", "nav", "main", "aside", "section", "footer", "form", "dialog"].includes(tag);
+  }
+
   function getDomPath(element) {
-    const parts = [];
+    const rawParts = [];
     for (let current = element; current?.nodeType === Node.ELEMENT_NODE; current = current.parentElement) {
-      parts.unshift(pathSegment(current));
-      if (current.tagName === "BODY") break;
+      const seg = pathSegment(current);
+      rawParts.unshift({ seg, current });
+      if (current.id && current !== element && current.tagName !== "BODY" && current.tagName !== "HTML") {
+        break;
+      }
+      if (current.tagName === "BODY" || current.tagName === "HTML") break;
     }
-    return (parts.length > 6 ? [...parts.slice(0, 2), "…", ...parts.slice(-3)] : parts).join(" > ");
+
+    const segments = rawParts.map((p) => p.seg);
+    if (segments.length <= 6) {
+      return segments.join(" > ");
+    }
+
+    const landmarkIdx = rawParts.findIndex(
+      (p, idx) => idx > 0 && idx < rawParts.length - 3 && isLandmark(p.current)
+    );
+    if (landmarkIdx !== -1) {
+      return [segments[0], "…", segments[landmarkIdx], "…", ...segments.slice(-3)].join(" > ");
+    }
+
+    return [segments[0], "…", ...segments.slice(-4)].join(" > ");
+  }
+
+  function findTooltipText(element) {
+    const withTitle = element.closest("[title]");
+    if (withTitle?.getAttribute("title")?.trim()) {
+      return withTitle.getAttribute("title").trim();
+    }
+
+    const withAria = element.closest("[aria-label]");
+    if (withAria?.getAttribute("aria-label")?.trim()) {
+      return withAria.getAttribute("aria-label").trim();
+    }
+
+    const svgEl = element.tagName === "SVG" ? element : element.closest("svg");
+    if (svgEl) {
+      const svgTitle = svgEl.querySelector("title");
+      if (svgTitle?.textContent?.trim()) return svgTitle.textContent.trim();
+    }
+
+    const imgEl = element.tagName === "IMG" ? element : element.querySelector("img");
+    if (imgEl?.alt?.trim()) return imgEl.alt.trim();
+
+    if (element.id && typeof CSS !== "undefined" && CSS.escape) {
+      try {
+        const labelFor = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
+        if (labelFor?.innerText?.trim()) return labelFor.innerText.trim();
+      } catch {}
+    }
+
+    const interactive = element.closest("button, a, [role='button'], label, summary");
+    if (interactive && interactive !== element) {
+      const t = (interactive.innerText || "").trim();
+      if (t && t.length < 80) return t;
+    }
+
+    const groupContainer = element.closest(".group, [data-tooltip], [role='tooltip']");
+    if (groupContainer) {
+      const tip = groupContainer.querySelector(
+        "[role='tooltip'], [data-tooltip-content], .tooltip, [class*='group-hover:opacity-100']"
+      );
+      if (tip) {
+        const tipText = (tip.innerText || tip.textContent || "").trim();
+        if (tipText && tipText.length < 100) return tipText;
+      }
+    }
+
+    return "";
   }
 
   function getElementContext(element) {
@@ -53,16 +124,44 @@
     const classLimit = isDetailed ? 30 : 8;
     const classText = classes.slice(0, classLimit).join(" ") || "(none)";
     const remaining = classes.length > classLimit ? ` …+${classes.length - classLimit}` : "";
-    const text = shorten(element.innerText || element.textContent, isDetailed ? 120 : 60);
+
+    let directText = "";
+    if (element.tagName !== "SVG" && element.namespaceURI !== "http://www.w3.org/2000/svg") {
+      directText = shorten(element.innerText || element.textContent, isDetailed ? 120 : 60);
+    }
+
+    const labelOrTooltip = findTooltipText(element);
+    const interactive = element.closest("button, a, [role='button'], input, select, textarea, label, summary");
+    const isInsideInteractive = interactive && interactive !== element;
+
     const details = [];
-    const role = element.getAttribute("role");
-    const label = element.getAttribute("aria-label");
+    const role = element.getAttribute("role") || (isInsideInteractive ? interactive.getAttribute("role") : null);
     const title = element.getAttribute("title");
-    if (role) details.push(`role=${role}`);
-    if (label) details.push(`aria-label="${shorten(label, 60)}"`);
-    if (title) details.push(`title="${shorten(title, 60)}"`);
+    const ariaLabel = element.getAttribute("aria-label");
+    const name = element.getAttribute("name") || (isInsideInteractive ? interactive.getAttribute("name") : null);
+
+    if (role) details.push(`role="${role}"`);
+    if (name) details.push(`name="${name}"`);
+    if (title && title !== labelOrTooltip) details.push(`title="${shorten(title, 60)}"`);
+    if (ariaLabel && ariaLabel !== labelOrTooltip) details.push(`aria-label="${shorten(ariaLabel, 60)}"`);
     if (element instanceof HTMLAnchorElement && element.href) details.push(`href="${shorten(element.href, 100)}"`);
     if (element instanceof HTMLInputElement && element.type) details.push(`type=${element.type}`);
+
+    const dataAttrs = [];
+    const collectDataAttrs = (el) => {
+      if (!el?.attributes) return;
+      for (const attr of el.attributes) {
+        if (attr.name.startsWith("data-") && !attr.name.startsWith("data-vamber")) {
+          dataAttrs.push(`${attr.name}="${shorten(attr.value, 40)}"`);
+        }
+      }
+    };
+    collectDataAttrs(element);
+    if (isInsideInteractive) collectDataAttrs(interactive);
+
+    if (dataAttrs.length) {
+      details.push(Array.from(new Set(dataAttrs)).slice(0, 4).join(" "));
+    }
 
     const lines = [
       "[UI target]",
@@ -70,9 +169,51 @@
       `Path: ${getDomPath(element)}`,
       `Classes: ${classText}${remaining}`
     ];
-    if (text) lines.push(`Text: "${text}"`);
-    if (details.length) lines.push(`Info: ${details.join(" | ")}`);
-    if (isDetailed) lines.push(`HTML: ${shorten(element.outerHTML, 400)}`);
+
+    if (isInsideInteractive) {
+      const parentTag = interactive.tagName.toLowerCase();
+      const parentId = interactive.id ? `#${interactive.id}` : "";
+      const parentClass = interactive.classList.item(0) ? `.${interactive.classList.item(0)}` : "";
+      lines.push(`Parent: <${parentTag}${parentId}${parentClass}>`);
+    }
+
+    if (labelOrTooltip) {
+      lines.push(`Label: "${shorten(labelOrTooltip, 80)}"`);
+    }
+
+    if (directText && directText !== labelOrTooltip) {
+      lines.push(`Text: "${directText}"`);
+    }
+
+    if (details.length) {
+      lines.push(`Info: ${details.join(" | ")}`);
+    }
+
+    if (isDetailed) {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const metrics = [
+        `${Math.round(rect.width)}×${Math.round(rect.height)}px`,
+        style.display,
+        style.position !== "static" ? `${style.position}${style.zIndex && style.zIndex !== "auto" ? ` z=${style.zIndex}` : ""}` : null,
+        Number(style.opacity) < 1 ? `opacity=${style.opacity}` : null,
+      ].filter(Boolean);
+      lines.push(`Layout: ${metrics.join(" | ")}`);
+
+      const states = [];
+      if (element.disabled || (isInsideInteractive && interactive?.disabled)) states.push("disabled");
+      if (element.checked) states.push("checked");
+      if (element.readOnly) states.push("readonly");
+      if (states.length) {
+        lines.push(`State: ${states.join(", ")}`);
+      }
+
+      const htmlTarget = (isInsideInteractive && interactive) ? interactive : element;
+      const htmlPrefix = (isInsideInteractive && interactive) ? "Parent HTML" : "HTML";
+      const cleanHtml = (htmlTarget.outerHTML || "").replace(/\s+/g, " ").trim();
+      lines.push(`${htmlPrefix}: ${shorten(cleanHtml, 600)}`);
+    }
+
     return lines.join("\n");
   }
 

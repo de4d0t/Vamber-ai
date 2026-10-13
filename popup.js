@@ -22,5 +22,5 @@ controls.detail.addEventListener("change", () => {
 function updateHint() {
   document.getElementById("detailHint").textContent = controls.detail.value === "compact"
     ? "Compact to save tokens"
-    : "Includes HTML and extra details";
+    : "Includes layout, parent HTML & state";
 }
