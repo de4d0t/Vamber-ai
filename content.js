@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const DEFAULTS = { hoverPreview: true, detail: "compact", toast: true };
+  const DEFAULTS = { detail: "compact" };
   const FLASH_MS = 500;
   let settings = { ...DEFAULTS };
   let hoveredElement = null;
@@ -14,10 +14,7 @@
     chrome.storage.sync.get(DEFAULTS, (saved) => { settings = { ...DEFAULTS, ...saved }; });
     chrome.storage.onChanged?.addListener((changes, area) => {
       if (area !== "sync") return;
-      for (const key of Object.keys(DEFAULTS)) {
-        if (changes[key]) settings[key] = changes[key].newValue;
-      }
-      if (!settings.hoverPreview) clearHover();
+      if (changes.detail) settings.detail = changes.detail.newValue || DEFAULTS.detail;
     });
   }
 
@@ -118,12 +115,120 @@
     return "";
   }
 
+  function getUniqueSelector(element) {
+    const esc = (value) => (typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/[^a-zA-Z0-9_-]/g, "\\$&"));
+    const cssString = (value) => `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\n/g, "\\a ").replace(/\r/g, "\\d ")}"`;
+    const root = element.getRootNode();
+    const queryRoot = typeof root.querySelectorAll === "function" ? root : document;
+    const isUnique = (selector) => {
+      try { return queryRoot.querySelectorAll(selector).length === 1 && queryRoot.querySelector(selector) === element; }
+      catch { return false; }
+    };
+
+    for (const attribute of ["data-testid", "data-test", "data-cy"] ) {
+      const value = element.getAttribute(attribute);
+      if (value) {
+        const selector = `${element.tagName.toLowerCase()}[${attribute}="${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"]`;
+        if (isUnique(selector)) return selector;
+      }
+    }
+    if (element.id) {
+      const selector = `#${esc(element.id)}`;
+      if (isUnique(selector)) return selector;
+    }
+
+    for (const attribute of ["aria-label", "title", "name"]) {
+      const value = element.getAttribute(attribute);
+      if (!value?.trim()) continue;
+      const selector = `${element.tagName.toLowerCase()}[${attribute}=${cssString(value)}]`;
+      if (isUnique(selector)) return selector;
+    }
+
+    const parts = [];
+    for (let current = element; current && current.nodeType === Node.ELEMENT_NODE; current = current.parentElement) {
+      let segment = current.tagName.toLowerCase();
+      if (current.id) {
+        segment += `#${esc(current.id)}`;
+      } else {
+        const stableClasses = Array.from(current.classList).filter((name) => !/^(_|css-|jsx-|sc-|\w{16,})/.test(name)).slice(0, 2);
+        if (stableClasses.length) segment += stableClasses.map((name) => `.${esc(name)}`).join("");
+        const siblings = current.parentElement
+          ? Array.from(current.parentElement.children).filter((sibling) => sibling.tagName === current.tagName)
+          : [];
+        if (siblings.length > 1) segment += `:nth-of-type(${siblings.indexOf(current) + 1})`;
+      }
+      parts.unshift(segment);
+      const selector = parts.join(" > ");
+      if (isUnique(selector)) return selector;
+      if (current.tagName === "BODY" || current.tagName === "HTML") break;
+    }
+    return parts.join(" > ");
+  }
+
+  function getReactMetadata(element) {
+    const fiberKey = Object.keys(element).find((key) => key.startsWith("__reactFiber$") || key.startsWith("__reactInternalInstance$"));
+    if (!fiberKey) return null;
+    let fiber = element[fiberKey];
+    if (!fiber) return null;
+
+    const names = [];
+    const seen = new Set();
+    for (let current = fiber; current && names.length < 8; current = current._debugOwner) {
+      const type = current.type;
+      const name = typeof type === "function" ? (type.displayName || type.name) : (type?.displayName || type?.name);
+      if (name && name !== "Fragment" && !seen.has(name)) {
+        names.push(name);
+        seen.add(name);
+      }
+    }
+    names.reverse();
+    return names.length ? { component: names.join(" > ") } : null;
+  }
+
+  function getSectionContext(element) {
+    const getRegionLabel = (region) => {
+      const root = region.getRootNode();
+      const findById = (id) => root.getElementById?.(id) || document.getElementById(id);
+      const labelledBy = (region.getAttribute("aria-labelledby") || "")
+        .split(/\s+/)
+        .map((id) => findById(id)?.innerText || findById(id)?.textContent || "")
+        .filter(Boolean)
+        .join(" ");
+      const heading = region.querySelector("h1, h2, h3, h4, [role='heading']");
+      return shorten(
+        region.getAttribute("aria-label") || region.getAttribute("title") || labelledBy || heading?.innerText || heading?.textContent || "",
+        60
+      );
+    };
+
+    const modal = element.closest("dialog, [role='dialog'], [aria-modal='true']");
+    if (modal) {
+      const label = getRegionLabel(modal);
+      return label ? `Modal: "${label}"` : "Modal";
+    }
+
+    const regions = [];
+    for (let current = element.parentElement; current && regions.length < 3; current = current.parentElement) {
+      const tag = current.tagName.toLowerCase();
+      const role = current.getAttribute("role");
+      const label = getRegionLabel(current);
+      let name = "";
+      if (tag === "header" || role === "banner") name = "Header";
+      else if (tag === "nav" || role === "navigation") name = "Navbar";
+      else if (tag === "main" || role === "main") name = "Main";
+      else if (tag === "aside" || role === "complementary") name = "Sidebar";
+      else if (tag === "footer" || role === "contentinfo") name = "Footer";
+      else if (tag === "form") name = "Form";
+      else if ((tag === "section" || tag === "article" || role === "region") && label) name = `${tag === "article" ? "Card" : "Section"} "${label}"`;
+      if (name) regions.unshift(name);
+    }
+    return regions.join(" > ");
+  }
+
   function getElementContext(element) {
     const classes = Array.from(element.classList);
     const isDetailed = settings.detail === "detailed";
-    const classLimit = isDetailed ? 30 : 8;
-    const classText = classes.slice(0, classLimit).join(" ") || "(none)";
-    const remaining = classes.length > classLimit ? ` …+${classes.length - classLimit}` : "";
+    const classText = classes.join(" ") || "(none)";
 
     let directText = "";
     if (element.tagName !== "SVG" && element.namespaceURI !== "http://www.w3.org/2000/svg") {
@@ -134,59 +239,51 @@
     const interactive = element.closest("button, a, [role='button'], input, select, textarea, label, summary");
     const isInsideInteractive = interactive && interactive !== element;
 
-    const details = [];
-    const role = element.getAttribute("role") || (isInsideInteractive ? interactive.getAttribute("role") : null);
-    const title = element.getAttribute("title");
-    const ariaLabel = element.getAttribute("aria-label");
-    const name = element.getAttribute("name") || (isInsideInteractive ? interactive.getAttribute("name") : null);
-
-    if (role) details.push(`role="${role}"`);
-    if (name) details.push(`name="${name}"`);
-    if (title && title !== labelOrTooltip) details.push(`title="${shorten(title, 60)}"`);
-    if (ariaLabel && ariaLabel !== labelOrTooltip) details.push(`aria-label="${shorten(ariaLabel, 60)}"`);
-    if (element instanceof HTMLAnchorElement && element.href) details.push(`href="${shorten(element.href, 100)}"`);
-    if (element instanceof HTMLInputElement && element.type) details.push(`type=${element.type}`);
-
-    const dataAttrs = [];
-    const collectDataAttrs = (el) => {
-      if (!el?.attributes) return;
-      for (const attr of el.attributes) {
-        if (attr.name.startsWith("data-") && !attr.name.startsWith("data-vamber")) {
-          dataAttrs.push(`${attr.name}="${shorten(attr.value, 40)}"`);
-        }
-      }
-    };
-    collectDataAttrs(element);
-    if (isInsideInteractive) collectDataAttrs(interactive);
-
-    if (dataAttrs.length) {
-      details.push(Array.from(new Set(dataAttrs)).slice(0, 4).join(" "));
+    const attributes = [];
+    for (const name of ["id", "aria-label", "title", "name", "type", "role", "data-testid", "data-test", "data-cy", "aria-pressed", "aria-expanded", "aria-current"]) {
+      const value = element.getAttribute(name);
+      if (value !== null && value !== "") attributes.push(`${name}="${shorten(value, 60)}"`);
     }
+    if (element instanceof HTMLAnchorElement && element.href) {
+      try {
+        attributes.push(`href="${shorten(new URL(element.href).pathname, 100)}"`);
+      } catch {}
+    }
+    if (element.disabled) attributes.push("disabled");
 
+    const label = labelOrTooltip || directText || element.getAttribute("placeholder") || element.getAttribute("alt") || "";
+    const react = getReactMetadata(element);
+    const section = getSectionContext(element);
     const lines = [
-      "[UI target]",
-      `Element: ${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ""}`,
-      `Path: ${getDomPath(element)}`,
-      `Classes: ${classText}${remaining}`
+      `## 1. Element: ${element.tagName.toLowerCase()}${label ? ` "${shorten(label, 70)}"` : element.id ? `#${element.id}` : ""}`,
+      "Task: [Describe_the_change]",
+      `- Selector: \`${getUniqueSelector(element)}\``
     ];
+
+    const componentNames = react?.component?.split(" > ").filter(Boolean).slice(-4);
+    const componentName = componentNames?.join(" > ");
+    if (componentName && section) lines.push(`- Component / Section: ${componentName} (${section})`);
+    else if (componentName) lines.push(`- React component: ${componentName}`);
+    else if (section) lines.push(`- Section: ${section}`);
+    if (typeof ShadowRoot !== "undefined" && element.getRootNode() instanceof ShadowRoot) {
+      lines.push("- Scope: selector is relative to this shadow root");
+    }
+    lines.push(`- Classes: \`${shorten(classText, isDetailed ? 1200 : 500)}\``);
 
     if (isInsideInteractive) {
       const parentTag = interactive.tagName.toLowerCase();
       const parentId = interactive.id ? `#${interactive.id}` : "";
       const parentClass = interactive.classList.item(0) ? `.${interactive.classList.item(0)}` : "";
-      lines.push(`Parent: <${parentTag}${parentId}${parentClass}>`);
+      const parentLabel = interactive.getAttribute("aria-label") || interactive.getAttribute("title");
+      lines.push(`- Parent: <${parentTag}${parentId}${parentClass}>${parentLabel ? ` "${shorten(parentLabel, 60)}"` : ""}`);
     }
 
-    if (labelOrTooltip) {
-      lines.push(`Label: "${shorten(labelOrTooltip, 80)}"`);
+    if (directText) {
+      lines.push(`- Text: "${directText}"`);
     }
 
-    if (directText && directText !== labelOrTooltip) {
-      lines.push(`Text: "${directText}"`);
-    }
-
-    if (details.length) {
-      lines.push(`Info: ${details.join(" | ")}`);
+    if (attributes.length) {
+      lines.push(`- Attributes: ${attributes.join(" | ")}`);
     }
 
     if (isDetailed) {
@@ -198,20 +295,22 @@
         style.position !== "static" ? `${style.position}${style.zIndex && style.zIndex !== "auto" ? ` z=${style.zIndex}` : ""}` : null,
         Number(style.opacity) < 1 ? `opacity=${style.opacity}` : null,
       ].filter(Boolean);
-      lines.push(`Layout: ${metrics.join(" | ")}`);
+      lines.push(`- Layout: ${metrics.join(" | ")}`);
 
       const states = [];
       if (element.disabled || (isInsideInteractive && interactive?.disabled)) states.push("disabled");
       if (element.checked) states.push("checked");
       if (element.readOnly) states.push("readonly");
       if (states.length) {
-        lines.push(`State: ${states.join(", ")}`);
+        lines.push(`- State: ${states.join(", ")}`);
       }
 
       const htmlTarget = (isInsideInteractive && interactive) ? interactive : element;
       const htmlPrefix = (isInsideInteractive && interactive) ? "Parent HTML" : "HTML";
-      const cleanHtml = (htmlTarget.outerHTML || "").replace(/\s+/g, " ").trim();
-      lines.push(`${htmlPrefix}: ${shorten(cleanHtml, 600)}`);
+      const htmlClone = htmlTarget.cloneNode(true);
+      if (htmlTarget === element) htmlClone.removeAttribute("class");
+      const cleanHtml = (htmlClone.outerHTML || "").replace(/\s+/g, " ").trim();
+      lines.push(`- ${htmlPrefix}: \`${shorten(cleanHtml, 600)}\``);
     }
 
     return lines.join("\n");
@@ -325,7 +424,6 @@
   }
 
   function showToast(success = true) {
-    if (!settings.toast) return;
     let host = document.getElementById("vamber-ai-toast-host");
     if (!host) {
       host = document.createElement("vamber-ai-toast");
@@ -380,8 +478,9 @@
   async function selectElement(element) {
     if (!element) return;
     clearHover();
+    const context = getElementContext(element);
     try {
-      await copyText(getElementContext(element));
+      await copyText(context);
       flashSuccess(element);
       showToast(true);
     } catch (error) {
@@ -392,7 +491,7 @@
 
   document.addEventListener("mousemove", (event) => {
     pointer = { x: event.clientX, y: event.clientY };
-    if (settings.hoverPreview && event.altKey) {
+    if (event.altKey) {
       const element = getEventElement(event);
       const overlay = findTransparentOverlay(event.clientX, event.clientY, element);
       const target = overlay || element;
@@ -403,7 +502,7 @@
   }, true);
 
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Alt" && settings.hoverPreview) {
+    if (event.key === "Alt") {
       const element = document.elementFromPoint(pointer.x, pointer.y);
       if (element) {
         const overlay = findTransparentOverlay(pointer.x, pointer.y, element);
@@ -426,4 +525,5 @@
     const overlay = findTransparentOverlay(event.clientX, event.clientY, target);
     void selectElement(overlay || target);
   }, true);
+
 })();

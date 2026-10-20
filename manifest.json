@@ -2,12 +2,13 @@
   "manifest_version": 3,
   "name": "Vamber AI — UI Context",
   "short_name": "Vamber AI",
-  "version": "1.5.0",
-  "description": "Inspect a webpage element and copy compact, AI-ready context.",
+  "version": "1.6.6",
+  "description": "Inspect webpage elements and copy focused, AI-ready context.",
   "author": "Vamber AI",
   "permissions": [
     "clipboardWrite",
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "http://*/*",
@@ -28,6 +29,9 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
+  },
+  "background": {
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {

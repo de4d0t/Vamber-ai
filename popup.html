@@ -11,41 +11,51 @@
     <header class="brand">
       <img src="icons/icon48.png" alt="" width="42" height="42">
       <div>
-        <h1>Vamber <span>AI</span></h1>
+        <h1>Vamber <span>AI</span> <small class="version-label" id="currentVersion"></small></h1>
         <p>UI context assistant</p>
       </div>
-      <span class="status" title="Extension ready"></span>
+      <button class="update-icon" id="updateButton" type="button" aria-label="No update available" title="No update available" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3"/></svg>
+        <span class="update-dot" aria-hidden="true"></span>
+      </button>
     </header>
 
-    <section class="quickstart">
-      <div class="eyebrow">SELECT AN ELEMENT</div>
-      <div class="shortcut"><kbd>Alt</kbd><span>+</span><span class="mouse">Left Click</span></div>
-      <p>Hold Alt to preview an element, then click to copy its context.</p>
-    </section>
 
-    <section class="settings" aria-label="Settings">
-      <label class="setting-row" for="hoverPreview">
-        <span><strong>Hover preview</strong><small>Show a cyan outline before selecting</small></span>
-        <input id="hoverPreview" type="checkbox">
-        <i class="switch" aria-hidden="true"></i>
-      </label>
-      <label class="setting-row" for="toast">
-        <span><strong>Copy notification</strong><small>Show confirmation after copying</small></span>
-        <input id="toast" type="checkbox">
-        <i class="switch" aria-hidden="true"></i>
-      </label>
-      <div class="setting-row detail-row">
-        <span><strong>Context detail</strong><small id="detailHint">Compact to save tokens</small></span>
-        <select id="detail" aria-label="Context detail">
-          <option value="compact">Compact</option>
-          <option value="detailed">Detailed</option>
-        </select>
+    <section class="settings" aria-label="Context detail">
+      <div class="detail-heading">
+        <strong>Context detail</strong>
+        <small id="detailHint">Compact to save tokens</small>
       </div>
+      <div class="detail-options" role="group" aria-label="Choose context detail">
+        <button class="detail-option compact selected" type="button" data-detail="compact" aria-pressed="true">
+          <span class="option-title">Compact</span>
+        </button>
+        <button class="detail-option detailed" type="button" data-detail="detailed" aria-pressed="false">
+          <span class="option-title">Detailed</span>
+        </button>
+      </div>
+          <p class="selection-hint"><kbd>Alt</kbd> + Left Click <span>· hover to preview</span></p>
     </section>
 
-    <footer>
-      <span>Vamber AI</span>
-      <span>© 2026 All rights reserved</span>
+    <footer class="popup-footer">
+      <div class="footer-credit" dir="ltr">
+        <svg class="credit-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14"/></svg>
+        <span>Designed &amp; Developed by <strong>Ahmed Al-jaberi</strong></span>
+      </div>
+      <nav class="footer-links" aria-label="Ahmed Al-jaberi links">
+        <a class="footer-link" href="https://iq-cyborg.vercel.app/" target="_blank" rel="noopener noreferrer" aria-label="CYBORG website" title="CYBORG website">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>
+        </a>
+        <a class="footer-link" href="https://t.me/YYxYY" target="_blank" rel="noopener noreferrer" aria-label="Telegram" title="Telegram">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M21.8 4.2 18.6 19c-.24 1.04-.86 1.3-1.75.81l-4.84-3.57-2.34 2.25c-.26.26-.48.48-.98.48l.35-4.93 8.98-8.12c.39-.35-.08-.55-.6-.2L6.32 12.8l-4.8-1.5c-1.04-.33-1.06-1.04.22-1.55L20.5 2.3c.86-.32 1.61.2 1.3 1.9Z"/></svg>
+        </a>
+        <a class="footer-link" href="https://instagram.com/3BF" target="_blank" rel="noopener noreferrer" aria-label="Instagram" title="Instagram">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.5 6.5h.01"/></svg>
+        </a>
+        <a class="footer-link" href="https://github.com/De4d0t" target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.56 9.56 0 0 1 12 6.84c.85 0 1.71.12 2.51.34 1.91-1.3 2.75-1.03 2.75-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.94.36.31.68.92.68 1.86v2.73c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+        </a>
+      </nav>
     </footer>
   </main>
   <script src="popup.js"></script>
