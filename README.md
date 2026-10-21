@@ -4,6 +4,10 @@ Pick an element on a live webpage and copy focused, AI-ready UI context to your 
 
 ![Vamber AI icon](icons/icon128.png)
 
+## Demo
+
+![Vamber AI Demo](demo.gif)
+
 ## Features
 
 - **Alt + Left Click** selects an element and copies a structured, AI-ready prompt with a unique CSS selector and a task placeholder.
@@ -36,45 +40,15 @@ To load a newer downloaded version, replace the extension files and select **Rel
 
 The copied context may include the element's text, classes, accessibility labels, link address, data attributes, and—when Detailed mode is selected—a shortened HTML snippet. Review it before sharing, especially when selecting elements near private or account data.
 
-## GitHub release checks
+## Privacy & Permissions
 
-The extension checks the public `de4d0t/Vamber-ai` Releases endpoint on install, browser startup, when the cached check is older than six hours, and every six hours in the background. It compares the latest stable release tag with `version` in `manifest.json`.
-
-To publish a release:
-
-1. Update `version` in `manifest.json` using a higher semantic version, such as `1.6.6`.
-2. Commit and push the changes to GitHub.
-3. Create and publish a GitHub Release with a matching tag, such as `v1.6.6`.
-
-The update indicator opens the GitHub release page; it does not install files into an unpacked extension. Download the release source, replace the local files, and reload the extension in `chrome://extensions`. Chrome Web Store distribution is required for Chrome-managed automatic updates.
-
-## Permissions and privacy
-
-- **Host access (`http://*/*`, `https://*/*`)** lets the content script work on websites the user chooses to inspect. Chrome's internal pages and other restricted browser pages are not accessible to extensions.
-- **`clipboardWrite`** is used to copy the selected element context.
-- **`storage`** saves the Compact/Detailed preference and caches public release-check results in local storage.
-- **`alarms`** schedules the periodic GitHub release check.
-
-Page content is read locally to build the selected element's context and is written to the clipboard after the user selects an element. Vamber AI does not upload the page URL, DOM, or copied context. The background checker makes an HTTPS request to GitHub for public release metadata; it does not include page data in that request.
+- **100% Local & Private**: Element context and DOM data are processed locally and never leave your machine.
+- **Minimal Permissions**: Requires `clipboardWrite` to copy context, `storage` to save preferences, and `alarms` for background update checks.
 
 ## Limitations
 
-- Browser-internal pages, the Chrome Web Store, and other restricted pages cannot be inspected.
-- WebGL, Canvas, and Three.js objects are drawn inside a canvas and are not separate DOM elements. Vamber AI can identify the canvas or a detectable HTML overlay above it, but cannot identify an individual 3D mesh as a DOM node.
-- Selectors are generated from the current DOM and may change when the page structure changes. Shadow DOM selectors are scoped to their shadow root.
-- The content script runs in each matching frame; cross-origin frame content is captured only when the selected element is inside a frame where Chrome allows the script to run.
-
-## Project files
-
-```text
-manifest.json       Extension metadata, permissions, and content script registration
-content.js          Alt-click selection, hover preview, and context extraction
-background.js       GitHub release checks and toolbar badge
-popup.html          Extension popup
-popup.css           Popup and status styling
-popup.js            Popup settings and update indicator
-icons/              Toolbar icons and icon generator
-```
+- Internal browser pages (`chrome://`, Chrome Web Store) cannot be inspected due to browser security restrictions.
+- WebGL and Canvas graphics are treated as single elements rather than individual DOM nodes.
 
 ## Credits
 
