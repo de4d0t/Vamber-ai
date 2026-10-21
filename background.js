@@ -1,6 +1,6 @@
 const RELEASE_API = "https://api.github.com/repos/de4d0t/Vamber-ai/releases/latest";
 const RELEASE_CHECK_ALARM = "github-release-check";
-const CHECK_PERIOD_MINUTES = 360;
+const CHECK_PERIOD_MINUTES = 60;
 const DEFAULT_TITLE = "Vamber AI — UI Context";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -20,7 +20,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "GET_UPDATE_STATUS") {
     chrome.storage.local.get("githubUpdate", ({ githubUpdate }) => {
-      const maxAge = githubUpdate?.available ? CHECK_PERIOD_MINUTES * 60_000 : 60_000;
+      const maxAge = CHECK_PERIOD_MINUTES * 60_000;
       const isStale = !githubUpdate?.checkedAt || Date.now() - githubUpdate.checkedAt > maxAge;
       if (isStale) {
         checkForUpdate().then(sendResponse);
