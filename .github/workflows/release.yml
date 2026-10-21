@@ -1,0 +1,33 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Package Extension
+        id: package
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG_NAME#v}"
+          ZIP_NAME="vamber-ai-${TAG_NAME}.zip"
+          zip -r "${ZIP_NAME}" manifest.json background.js content.js popup.html popup.css popup.js icons/
+          echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Vamber AI ${{ github.ref_name }}
+          files: ${{ steps.package.outputs.zip_name }}
+          generate_release_notes: true

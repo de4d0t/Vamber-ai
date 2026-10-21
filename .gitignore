@@ -1,0 +1,11 @@
+# Release packages and archives
+*.zip
+releases/
+dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
