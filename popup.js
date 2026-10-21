@@ -15,8 +15,23 @@ for (const button of detailOptions) {
 updateButton.addEventListener("click", () => {
   if (updateButton.dataset.releaseUrl) {
     chrome.tabs.create({ url: updateButton.dataset.releaseUrl });
+    return;
   }
+  triggerCheck();
 });
+
+function triggerCheck() {
+  updateButton.title = "Checking GitHub for updates...";
+  updateButton.setAttribute("aria-label", updateButton.title);
+  chrome.runtime.sendMessage({ type: "CHECK_FOR_UPDATE" }, (result) => {
+    if (chrome.runtime.lastError) {
+      updateButton.title = "Update checker is unavailable";
+      updateButton.setAttribute("aria-label", updateButton.title);
+      return;
+    }
+    renderUpdateStatus(result);
+  });
+}
 
 chrome.runtime.sendMessage({ type: "GET_UPDATE_STATUS" }, (result) => {
   if (chrome.runtime.lastError) {
@@ -49,10 +64,10 @@ function selectDetail(detail, save) {
 function renderUpdateStatus(result) {
   updateButton.classList.remove("available");
   delete updateButton.dataset.releaseUrl;
-  updateButton.disabled = true;
+  updateButton.disabled = false;
 
   if (!result || result.status === "error") {
-    updateButton.title = result?.message || "Could not check GitHub right now";
+    updateButton.title = result?.message || "Could not check GitHub right now. Click to check again.";
     updateButton.setAttribute("aria-label", updateButton.title);
     return;
   }

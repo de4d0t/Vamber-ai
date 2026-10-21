@@ -20,7 +20,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "GET_UPDATE_STATUS") {
     chrome.storage.local.get("githubUpdate", ({ githubUpdate }) => {
-      const isStale = !githubUpdate?.checkedAt || Date.now() - githubUpdate.checkedAt > CHECK_PERIOD_MINUTES * 60_000;
+      const maxAge = githubUpdate?.available ? CHECK_PERIOD_MINUTES * 60_000 : 60_000;
+      const isStale = !githubUpdate?.checkedAt || Date.now() - githubUpdate.checkedAt > maxAge;
       if (isStale) {
         checkForUpdate().then(sendResponse);
       } else {
