@@ -40,6 +40,8 @@ To load a newer downloaded version, replace the extension files and select **Rel
 
 The copied context may include the element's text, classes, accessibility labels, link address, data attributes, and—when Detailed mode is selected—a shortened HTML snippet. Review it before sharing, especially when selecting elements near private or account data.
 
+https://github.com/user-attachments/assets/af22f778-0d4f-4aec-aef1-89fbf6fed810
+
 ## Privacy & Permissions
 
 - **100% Local & Private**: Element context and DOM data are processed locally and never leave your machine.
