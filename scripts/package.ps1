@@ -23,7 +23,6 @@ $filesToInclude = @(
     "popup.html",
     "popup.css",
     "popup.js",
-    "Update.bat",
     "icons"
 )
 
