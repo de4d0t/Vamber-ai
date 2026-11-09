@@ -21,8 +21,7 @@ h1 { margin: 0; font-size: 18px; letter-spacing: -.3px; }
 h1 span { color: #22d3ee; }
 h1 .version-label { display: inline-flex; vertical-align: 2px; margin-left: 3px; padding: 2px 5px; border: 1px solid #26364b; border-radius: 6px; color: #8292a8; background: #0e1725; font-size: 8px; font-weight: 600; letter-spacing: .15px; }
 .brand p { margin: 1px 0 0; color: #8493a8; font-size: 11px; }
-.header-actions { display: flex; align-items: center; gap: 6px; margin-inline-start: auto; }
-.update-icon { position: relative; display: grid; width: 31px; height: 31px; flex: none; place-items: center; padding: 0; border: 1px solid #26364b; border-radius: 10px; color: #8494aa; background: #0e1725; cursor: pointer; transition: color .16s,border-color .16s,background .16s,transform .16s; }
+.update-icon { position: relative; display: grid; width: 31px; height: 31px; flex: none; place-items: center; margin-inline-start: auto; padding: 0; border: 1px solid #26364b; border-radius: 10px; color: #8494aa; background: #0e1725; cursor: pointer; transition: color .16s,border-color .16s,background .16s,transform .16s; }
 .update-icon:hover { transform: translateY(-1px); border-color: #22d3ee70; color: #67e8f9; background: #102531; }
 .update-icon:focus-visible { outline: 2px solid #22d3ee; outline-offset: 2px; }
 .update-icon:disabled { transform: none; border-color: #1c2a3c; color: #596a80; background: #0b1320; cursor: default; }

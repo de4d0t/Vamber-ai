@@ -7,14 +7,12 @@ const OTA_SCRIPT_IDS = ["vamber-ota-user", "vamber-ota-main"];
 
 chrome.runtime.onInstalled.addListener(() => {
   scheduleReleaseChecks();
-  restoreOrClearOtaScript();
-  checkForUpdate();
+  restoreOrClearOtaScript().then(() => checkForUpdate());
 });
 
 chrome.runtime.onStartup.addListener(() => {
   scheduleReleaseChecks();
-  restoreOrClearOtaScript();
-  checkForUpdate();
+  restoreOrClearOtaScript().then(() => checkForUpdate());
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -23,18 +21,18 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "GET_UPDATE_STATUS") {
-    chrome.storage.local.get("githubUpdate", ({ githubUpdate }) => {
-      const currentVersion = chrome.runtime.getManifest().version;
+    chrome.storage.local.get(["githubUpdate", "otaContentScript"], ({ githubUpdate, otaContentScript }) => {
+      const manifestVersion = chrome.runtime.getManifest().version;
+      const activeVersion = getHigherVersion(manifestVersion, otaContentScript?.version);
       const maxAge = CHECK_PERIOD_MINUTES * 60_000;
       const isStale =
         !githubUpdate?.checkedAt ||
-        githubUpdate.currentVersion !== currentVersion ||
-        (githubUpdate.available && !githubUpdate.downloadUrl) ||
+        githubUpdate.manifestVersion !== manifestVersion ||
         Date.now() - githubUpdate.checkedAt > maxAge;
       if (isStale) {
         checkForUpdate().then(sendResponse);
       } else {
-        sendResponse(githubUpdate);
+        sendResponse({ ...githubUpdate, activeVersion });
       }
     });
     return true;
@@ -44,11 +42,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     checkForUpdate().then(sendResponse);
     return true;
   }
+
+  if (message?.type === "APPLY_GITHUB_UPDATE") {
+    applyGitHubUpdate().then(sendResponse);
+    return true;
+  }
+
   return false;
 });
 
 function scheduleReleaseChecks() {
   chrome.alarms.create(RELEASE_CHECK_ALARM, { periodInMinutes: CHECK_PERIOD_MINUTES });
+}
+
+function getHigherVersion(v1, v2) {
+  return compareVersions(v1, v2) >= 0 ? normalizeVersion(v1) : normalizeVersion(v2);
+}
+
+async function getActiveVersion() {
+  const manifestVersion = chrome.runtime.getManifest().version;
+  const { otaContentScript } = await chrome.storage.local.get("otaContentScript");
+  return getHigherVersion(manifestVersion, otaContentScript?.version);
 }
 
 async function clearOtaUserScripts() {
@@ -94,22 +108,18 @@ async function registerOtaUserScripts(code) {
 }
 
 async function restoreOrClearOtaScript() {
-  const currentVersion = chrome.runtime.getManifest().version;
+  const manifestVersion = chrome.runtime.getManifest().version;
   const { otaContentScript } = await chrome.storage.local.get("otaContentScript");
-  if (!otaContentScript?.version || compareVersions(otaContentScript.version, currentVersion) <= 0) {
+  if (!otaContentScript?.version || compareVersions(otaContentScript.version, manifestVersion) <= 0) {
     await clearOtaUserScripts();
     return;
   }
   await registerOtaUserScripts(otaContentScript.code);
 }
 
-async function syncRemoteContentScript(tag, latestVersion) {
+async function fetchAndStoreOtaScript(tag, latestVersion) {
   if (!tag) return false;
   try {
-    const { otaContentScript } = await chrome.storage.local.get("otaContentScript");
-    if (otaContentScript?.version === latestVersion && otaContentScript?.code) {
-      return await registerOtaUserScripts(otaContentScript.code);
-    }
     const response = await fetch(RAW_CONTENT_URL(tag), { cache: "no-store" });
     if (!response.ok) return false;
     const code = await response.text();
@@ -117,14 +127,37 @@ async function syncRemoteContentScript(tag, latestVersion) {
     await chrome.storage.local.set({
       otaContentScript: { version: latestVersion, tag, code, syncedAt: Date.now() }
     });
-    return await registerOtaUserScripts(code);
+    await registerOtaUserScripts(code);
+    return true;
   } catch {
     return false;
   }
 }
 
+async function applyGitHubUpdate() {
+  const status = await checkForUpdate();
+  if (!status?.available || !status.tagName) {
+    return { ...status, updatedNow: false };
+  }
+  const synced = await fetchAndStoreOtaScript(status.tagName, status.latestVersion);
+  if (synced) {
+    const updatedStatus = {
+      ...status,
+      available: false,
+      otaSynced: true,
+      updatedNow: true,
+      activeVersion: status.latestVersion,
+      checkedAt: Date.now()
+    };
+    await saveUpdateStatus(updatedStatus);
+    return updatedStatus;
+  }
+  return { ...status, updatedNow: false };
+}
+
 async function checkForUpdate() {
-  const currentVersion = chrome.runtime.getManifest().version;
+  const manifestVersion = chrome.runtime.getManifest().version;
+  const activeVersion = await getActiveVersion();
   try {
     const response = await fetch(RELEASE_API, {
       headers: { Accept: "application/vnd.github+json" },
@@ -132,7 +165,13 @@ async function checkForUpdate() {
     });
 
     if (response.status === 404) {
-      const result = { status: "none", available: false, currentVersion, checkedAt: Date.now() };
+      const result = {
+        status: "none",
+        available: false,
+        manifestVersion,
+        activeVersion,
+        checkedAt: Date.now()
+      };
       await saveUpdateStatus(result);
       return result;
     }
@@ -140,7 +179,7 @@ async function checkForUpdate() {
 
     const release = await response.json();
     const latestVersion = normalizeVersion(release.tag_name);
-    const available = compareVersions(latestVersion, currentVersion) > 0;
+    const available = compareVersions(latestVersion, activeVersion) > 0;
     const zipAsset = Array.isArray(release.assets)
       ? release.assets.find((asset) => asset.name?.endsWith(".zip") && asset.browser_download_url) || release.assets[0]
       : null;
@@ -150,19 +189,13 @@ async function checkForUpdate() {
         ? `https://github.com/de4d0t/Vamber-ai/releases/download/${release.tag_name}/vamber-ai-${release.tag_name}.zip`
         : release.html_url);
 
-    let otaSynced = false;
-    if (available) {
-      otaSynced = await syncRemoteContentScript(release.tag_name, latestVersion);
-    } else {
-      await clearOtaUserScripts();
-    }
-
     const result = {
       status: "checked",
       available,
-      otaSynced,
-      currentVersion,
+      manifestVersion,
+      activeVersion,
       latestVersion,
+      tagName: release.tag_name || `v${latestVersion}`,
       releaseUrl: release.html_url,
       downloadUrl,
       releaseName: release.name || "",
@@ -173,14 +206,15 @@ async function checkForUpdate() {
   } catch (error) {
     const previous = await chrome.storage.local.get("githubUpdate");
     const cached = previous.githubUpdate;
-    if (cached?.available && compareVersions(cached.latestVersion, currentVersion) > 0) {
+    if (cached?.available && compareVersions(cached.latestVersion, activeVersion) > 0) {
       await updateBadge(cached);
-      return cached;
+      return { ...cached, activeVersion };
     }
     const result = {
       status: "error",
       available: false,
-      currentVersion,
+      manifestVersion,
+      activeVersion,
       message: "Could not reach GitHub. Try again later.",
       checkedAt: Date.now()
     };
@@ -198,12 +232,8 @@ async function saveUpdateStatus(status) {
 async function updateBadge(status) {
   if (status.available) {
     await chrome.action.setBadgeBackgroundColor({ color: "#06b6d4" });
-    await chrome.action.setBadgeText({ text: status.otaSynced ? "SYNC" : "NEW" });
-    await chrome.action.setTitle({
-      title: status.otaSynced
-        ? `Vamber AI — Auto-synced to v${status.latestVersion} (click to download full ZIP)`
-        : `Vamber AI — Update available: v${status.latestVersion}`
-    });
+    await chrome.action.setBadgeText({ text: "NEW" });
+    await chrome.action.setTitle({ title: `Vamber AI — Update available: v${status.latestVersion}` });
     return;
   }
   await chrome.action.setBadgeText({ text: "" });

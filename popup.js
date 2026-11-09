@@ -1,14 +1,13 @@
 const DEFAULTS = { detail: "compact" };
 const detailOptions = Array.from(document.querySelectorAll("[data-detail]"));
-const currentVersion = chrome.runtime.getManifest().version;
+const manifestVersion = chrome.runtime.getManifest().version;
 const versionLabel = document.getElementById("currentVersion");
-const reloadButton = document.getElementById("reloadButton");
 const updateButton = document.getElementById("updateButton");
 const detailHint = document.getElementById("detailHint");
 let selectedDetail = DEFAULTS.detail;
 let statusTimer = null;
 
-versionLabel.textContent = `v${currentVersion}`;
+versionLabel.textContent = `v${manifestVersion}`;
 
 chrome.storage.sync.get(DEFAULTS, (settings) => {
   selectDetail(settings.detail || DEFAULTS.detail, false);
@@ -18,18 +17,8 @@ for (const button of detailOptions) {
   button.addEventListener("click", () => selectDetail(button.dataset.detail, true));
 }
 
-reloadButton?.addEventListener("click", () => {
-  showTemporaryStatus("Reloading extension…", 1000);
-  window.setTimeout(() => chrome.runtime.reload(), 120);
-});
-
 updateButton.addEventListener("click", () => {
-  const targetUrl = updateButton.dataset.downloadUrl || updateButton.dataset.releaseUrl;
-  if (targetUrl) {
-    startDownload(targetUrl, updateButton.dataset.latestVersion);
-    return;
-  }
-  triggerCheck(true);
+  handleSingleButtonAction();
 });
 
 function defaultHintText() {
@@ -48,45 +37,37 @@ function showTemporaryStatus(text, durationMs = 2400) {
   }
 }
 
-function startDownload(url, version) {
-  showTemporaryStatus(version ? `Downloading v${version} ZIP…` : "Downloading update…", 3000);
-  chrome.tabs.create({ url });
-}
-
-function triggerCheck(downloadIfAvailable = false) {
+function handleSingleButtonAction() {
+  const isUpdatePending = updateButton.classList.contains("available");
   updateButton.classList.add("checking");
   updateButton.disabled = true;
-  updateButton.title = "Checking GitHub for updates...";
-  updateButton.setAttribute("aria-label", updateButton.title);
-  showTemporaryStatus("Checking GitHub for updates…", 0);
+  showTemporaryStatus(isUpdatePending ? "Updating directly from GitHub…" : "Checking GitHub & reloading…", 0);
 
-  chrome.runtime.sendMessage({ type: "CHECK_FOR_UPDATE" }, (result) => {
+  chrome.runtime.sendMessage({ type: "APPLY_GITHUB_UPDATE" }, (result) => {
     updateButton.classList.remove("checking");
     updateButton.disabled = false;
 
     if (chrome.runtime.lastError) {
-      updateButton.title = "Update checker is unavailable";
-      updateButton.setAttribute("aria-label", updateButton.title);
-      showTemporaryStatus("Update checker is unavailable");
+      showTemporaryStatus("Reloading extension…", 1000);
+      window.setTimeout(() => chrome.runtime.reload(), 150);
       return;
     }
 
     renderUpdateStatus(result);
 
-    if (result?.available) {
-      const url = result.downloadUrl || result.releaseUrl;
-      if (result.otaSynced && !downloadIfAvailable) {
-        showTemporaryStatus(`Auto-synced v${result.latestVersion} from GitHub!`);
-      } else if (downloadIfAvailable && url) {
-        startDownload(url, result.latestVersion);
-      } else {
-        showTemporaryStatus(`Update v${result.latestVersion} is ready!`);
-      }
-    } else if (result?.status === "error") {
-      showTemporaryStatus("Could not reach GitHub right now");
-    } else {
-      showTemporaryStatus(`Up to date (v${currentVersion})`);
+    if (result?.updatedNow) {
+      showTemporaryStatus(`Updated to v${result.activeVersion}!`, 2800);
+      return;
     }
+
+    if (result?.available && (result.downloadUrl || result.releaseUrl)) {
+      showTemporaryStatus(`Downloading v${result.latestVersion} ZIP…`, 3000);
+      chrome.tabs.create({ url: result.downloadUrl || result.releaseUrl });
+      return;
+    }
+
+    showTemporaryStatus(`Up to date (v${result?.activeVersion || manifestVersion}) · Reloading…`, 1200);
+    window.setTimeout(() => chrome.runtime.reload(), 350);
   });
 }
 
@@ -119,35 +100,24 @@ function selectDetail(detail, save) {
 
 function renderUpdateStatus(result) {
   updateButton.classList.remove("available");
-  delete updateButton.dataset.releaseUrl;
-  delete updateButton.dataset.downloadUrl;
-  delete updateButton.dataset.latestVersion;
   updateButton.disabled = false;
-  versionLabel.textContent = `v${currentVersion}`;
+
+  const displayedVersion = result?.activeVersion || manifestVersion;
+  versionLabel.textContent = `v${displayedVersion}`;
 
   if (!result || result.status === "error") {
-    updateButton.title = result?.message || "Could not check GitHub right now. Click to check again.";
+    updateButton.title = result?.message || "Click to check GitHub or reload extension";
     updateButton.setAttribute("aria-label", updateButton.title);
     return;
   }
 
   if (result.available) {
     updateButton.classList.add("available");
-    updateButton.dataset.releaseUrl = result.releaseUrl || "";
-    updateButton.dataset.downloadUrl = result.downloadUrl || result.releaseUrl || "";
-    updateButton.dataset.latestVersion = result.latestVersion || "";
-    if (result.otaSynced) {
-      versionLabel.textContent = `v${currentVersion} → v${result.latestVersion}`;
-      updateButton.title = `Auto-synced v${result.latestVersion} from GitHub! Click to download full ZIP.`;
-    } else {
-      updateButton.title = `Download Vamber AI v${result.latestVersion} (.zip)`;
-    }
+    updateButton.title = `Update available: v${result.latestVersion}. Click to update now.`;
     updateButton.setAttribute("aria-label", updateButton.title);
     return;
   }
 
-  updateButton.title = result.status === "none"
-    ? `No GitHub release published yet (current v${currentVersion}). Click to check again.`
-    : `Vamber AI v${currentVersion} is up to date. Click to check for updates.`;
+  updateButton.title = `Vamber AI v${displayedVersion} is up to date. Click to check updates & reload.`;
   updateButton.setAttribute("aria-label", updateButton.title);
 }
