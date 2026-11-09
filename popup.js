@@ -3,6 +3,7 @@ const detailOptions = Array.from(document.querySelectorAll("[data-detail]"));
 const manifestVersion = chrome.runtime.getManifest().version;
 const versionLabel = document.getElementById("currentVersion");
 const updateButton = document.getElementById("updateButton");
+const downloadButton = document.getElementById("downloadButton");
 const detailHint = document.getElementById("detailHint");
 let selectedDetail = DEFAULTS.detail;
 let statusTimer = null;
@@ -18,7 +19,11 @@ for (const button of detailOptions) {
 }
 
 updateButton.addEventListener("click", () => {
-  handleSingleButtonAction();
+  checkForUpdatesOnly();
+});
+
+downloadButton.addEventListener("click", () => {
+  downloadAndApplyUpdate();
 });
 
 function defaultHintText() {
@@ -37,18 +42,47 @@ function showTemporaryStatus(text, durationMs = 2400) {
   }
 }
 
-function handleSingleButtonAction() {
-  const isUpdatePending = updateButton.classList.contains("available");
+function checkForUpdatesOnly() {
   updateButton.classList.add("checking");
   updateButton.disabled = true;
-  showTemporaryStatus(isUpdatePending ? "Updating directly from GitHub…" : "Checking GitHub for updates…", 0);
+  showTemporaryStatus("Checking GitHub for updates…", 0);
 
-  chrome.runtime.sendMessage({ type: "APPLY_GITHUB_UPDATE" }, (result) => {
+  chrome.runtime.sendMessage({ type: "CHECK_FOR_UPDATE" }, (result) => {
     updateButton.classList.remove("checking");
     updateButton.disabled = false;
 
     if (chrome.runtime.lastError) {
       showTemporaryStatus("Update checker is unavailable");
+      return;
+    }
+
+    renderUpdateStatus(result);
+
+    if (result?.available) {
+      showTemporaryStatus(`Update v${result.latestVersion} is available! Click download.`, 3200);
+      return;
+    }
+
+    if (result?.status === "error") {
+      showTemporaryStatus("Could not reach GitHub right now");
+      return;
+    }
+
+    showTemporaryStatus(`Up to date (v${result?.activeVersion || manifestVersion})`);
+  });
+}
+
+function downloadAndApplyUpdate() {
+  downloadButton.classList.add("checking");
+  downloadButton.disabled = true;
+  showTemporaryStatus("Downloading & applying update…", 0);
+
+  chrome.runtime.sendMessage({ type: "APPLY_GITHUB_UPDATE" }, (result) => {
+    downloadButton.classList.remove("checking");
+    downloadButton.disabled = false;
+
+    if (chrome.runtime.lastError) {
+      showTemporaryStatus("Update failed");
       return;
     }
 
@@ -102,21 +136,24 @@ function selectDetail(detail, save) {
 }
 
 function renderUpdateStatus(result) {
-  updateButton.classList.remove("available");
   updateButton.disabled = false;
+  downloadButton.disabled = false;
+  downloadButton.classList.add("hidden");
 
   const displayedVersion = result?.activeVersion || manifestVersion;
   versionLabel.textContent = `v${displayedVersion}`;
 
   if (!result || result.status === "error") {
-    updateButton.title = result?.message || "Click to check GitHub or reload extension";
+    updateButton.title = result?.message || "Click to check for updates";
     updateButton.setAttribute("aria-label", updateButton.title);
     return;
   }
 
   if (result.available) {
-    updateButton.classList.add("available");
-    updateButton.title = `Update available: v${result.latestVersion}. Click to update now.`;
+    downloadButton.classList.remove("hidden");
+    downloadButton.title = `Download & apply update v${result.latestVersion}`;
+    downloadButton.setAttribute("aria-label", downloadButton.title);
+    updateButton.title = `Update v${result.latestVersion} is available. Click to re-check.`;
     updateButton.setAttribute("aria-label", updateButton.title);
     return;
   }
