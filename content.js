@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SCRIPT_VERSION = "1.8.1";
+  const SCRIPT_VERSION = "1.8.2";
   const PROBE_EVENT = "__vamber_probe__";
   const PROBE_ATTR = "data-vamber-probe";
   const SUPERSEDE_EVENT = "__vamber_supersede__";
@@ -321,6 +321,8 @@
 
   const DEFAULTS = { detail: "compact" };
   const FLASH_MS = 500;
+  const DELETE_TASK_PROMPT =
+    "Task: Remove this element from the UI. Delete its JSX/HTML node in the source component and clean up any props, state, handlers, imports, or styles that become unused as a result, without breaking sibling layout.";
   let settings = {
     detail: document.documentElement?.getAttribute(DETAIL_ATTR) || DEFAULTS.detail
   };
@@ -1040,8 +1042,10 @@
 
   async function copyText(text) {
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch {}
     }
     const textarea = document.createElement("textarea");
     textarea.value = text;
@@ -1078,12 +1082,12 @@
     return indicator;
   }
 
-  function flashSuccess(element) {
-    const indicator = createIndicator(element, "#22c55e", 2);
+  function flashSuccess(element, color = "#22c55e") {
+    const indicator = createIndicator(element, color, 2);
     window.setTimeout(() => indicator.remove(), FLASH_MS);
   }
 
-  function showToast(success = true) {
+  function showToast(success = true, customTitle = "", customMessage = "") {
     let host = document.getElementById("vamber-ai-toast-host");
     if (!host) {
       host = document.createElement("vamber-ai-toast");
@@ -1106,9 +1110,9 @@
     const toast = host.shadowRoot.querySelector(".toast");
     toast.classList.toggle("error", !success);
     toast.querySelector(".icon").textContent = success ? "✓" : "!";
-    toast.querySelector(".title").textContent = success ? "Copied to clipboard" : "Copy failed";
+    toast.querySelector(".title").textContent = success ? (customTitle || "Copied to clipboard") : "Copy failed";
     toast.querySelector(".message").textContent = success
-      ? "Element context is ready to paste."
+      ? (customMessage || "Element context is ready to paste.")
       : "Clipboard access was blocked.";
     toast.classList.add("visible");
     window.clearTimeout(host._hideTimer);
@@ -1135,14 +1139,24 @@
     if (hoverOverlay && hoveredElement) placeIndicator(hoverOverlay, hoveredElement);
   }
 
-  async function selectElement(element) {
+  function resolvePointerTarget() {
+    if (hoveredElement?.isConnected) return hoveredElement;
+    const raw = document.elementFromPoint(pointer.x, pointer.y);
+    const element = resolveTargetElement(raw);
+    if (!element) return null;
+    const overlay = findTransparentOverlay(pointer.x, pointer.y, element);
+    return resolveTargetElement(overlay || element);
+  }
+
+  async function selectElement(element, options = {}) {
     if (!element) return;
     clearHover();
-    const context = getElementContext(element);
+    const baseContext = getElementContext(element);
+    const context = options.taskPrompt ? `${options.taskPrompt}\n\n${baseContext}` : baseContext;
     try {
       await copyText(context);
-      flashSuccess(element);
-      showToast(true);
+      flashSuccess(element, options.flashColor || "#22c55e");
+      showToast(true, options.toastTitle || "", options.toastMessage || "");
     } catch (error) {
       console.warn("Vamber AI: clipboard copy failed.", error);
       showToast(false);
@@ -1163,13 +1177,30 @@
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "Alt") {
-      const raw = document.elementFromPoint(pointer.x, pointer.y);
-      const element = resolveTargetElement(raw);
-      if (element) {
-        const overlay = findTransparentOverlay(pointer.x, pointer.y, element);
-        const target = resolveTargetElement(overlay || element);
-        if (target) showHover(target);
+      const target = resolvePointerTarget();
+      if (target) showHover(target);
+      return;
+    }
+    if (
+      event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.repeat &&
+      (event.code === "KeyD" || (typeof event.key === "string" && event.key.toLowerCase() === "d"))
+    ) {
+      const target = resolvePointerTarget();
+      if (target) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        void selectElement(target, {
+          taskPrompt: DELETE_TASK_PROMPT,
+          flashColor: "#f43f5e",
+          toastTitle: "Copied delete task",
+          toastMessage: "Remove-element task is ready to paste."
+        });
       }
+      return;
     }
     if (event.key === "Escape") clearHover();
   }, { capture: true, signal });

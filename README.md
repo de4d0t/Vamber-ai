@@ -11,6 +11,7 @@ Pick an element on a live webpage and copy focused, AI-ready UI context to your 
 ## Features
 
 - **Alt + Left Click**: Instantly copy structured, token-efficient UI context (page route, viewport breakpoint & theme, React/Vue/Svelte component, usage-site source file, component props, clean CSS selector, and current computed styles).
+- **Alt + D**: Hover over an element and press `Alt + D` to copy its context pre-filled with a clean, AI-ready instruction to remove the element and clean up unused code.
 - **Live Hover Preview**: Hold **Alt** to outline elements in cyan before selecting (`Esc` to dismiss).
 - **Compact & Detailed Modes**: Toggle between lightweight context and full DOM/attribute details.
 - **Visual Feedback**: Immediate flash and toast notification upon copying to clipboard.
@@ -31,7 +32,7 @@ To load a newer downloaded version, replace the extension files and click the **
 ## Use it
 
 1. Hold **Alt** and move the pointer over the target to preview it.
-2. Keep holding **Alt** and left-click to copy the context. Paste one or more copied blocks into your coding assistant and write your requested change above them.
+2. Keep holding **Alt** and left-click to copy the context—or press **Alt + D** while hovering to copy the context with a ready-made "Remove this element" task.
 3. Choose **Compact** or **Detailed** in the popup to control how much context is copied.
 
 ### What the agent receives
