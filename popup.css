@@ -27,6 +27,7 @@ h1 .version-label { display: inline-flex; vertical-align: 2px; margin-left: 3px;
 .update-icon:disabled { transform: none; border-color: #1c2a3c; color: #596a80; background: #0b1320; cursor: default; }
 .update-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .update-icon.available { border-color: #0e9f6e; color: #bbf7d0; background: #0c2a25; }
+.update-icon.checking { border-color: #22d3ee70; color: #67e8f9; opacity: .75; cursor: progress; }
 .update-dot { position: absolute; top: 3px; right: 3px; display: none; width: 7px; height: 7px; border: 1px solid #080d18; border-radius: 50%; background: #22c55e; box-shadow: 0 0 7px #22c55e99; }
 .update-icon.available .update-dot { display: block; }
 .settings { margin-top: 10px; padding: 13px; border: 1px solid #1a2638; border-radius: 14px; background: #0c1320; }

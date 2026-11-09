@@ -10,7 +10,7 @@ Pick an element on a live webpage and copy focused, AI-ready UI context to your 
 
 ## Features
 
-- **Alt + Left Click**: Instantly copy structured, AI-ready UI context (CSS selector, React component name, and task prompt).
+- **Alt + Left Click**: Instantly copy structured, token-efficient UI context (page route, React/Vue/Svelte component & source file, clean CSS selector, and task prompt).
 - **Live Hover Preview**: Hold **Alt** to outline elements in cyan before selecting (`Esc` to dismiss).
 - **Compact & Detailed Modes**: Toggle between lightweight context and full DOM/attribute details.
 - **Visual Feedback**: Immediate flash and toast notification upon copying to clipboard.

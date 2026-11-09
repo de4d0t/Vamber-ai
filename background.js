@@ -20,8 +20,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "GET_UPDATE_STATUS") {
     chrome.storage.local.get("githubUpdate", ({ githubUpdate }) => {
+      const currentVersion = chrome.runtime.getManifest().version;
       const maxAge = CHECK_PERIOD_MINUTES * 60_000;
-      const isStale = !githubUpdate?.checkedAt || Date.now() - githubUpdate.checkedAt > maxAge;
+      const isStale =
+        !githubUpdate?.checkedAt ||
+        githubUpdate.currentVersion !== currentVersion ||
+        (githubUpdate.available && !githubUpdate.downloadUrl) ||
+        Date.now() - githubUpdate.checkedAt > maxAge;
       if (isStale) {
         checkForUpdate().then(sendResponse);
       } else {
@@ -43,6 +48,7 @@ function scheduleReleaseChecks() {
 }
 
 async function checkForUpdate() {
+  const currentVersion = chrome.runtime.getManifest().version;
   try {
     const response = await fetch(RELEASE_API, {
       headers: { Accept: "application/vnd.github+json" },
@@ -50,22 +56,31 @@ async function checkForUpdate() {
     });
 
     if (response.status === 404) {
-      const result = { status: "none", available: false, checkedAt: Date.now() };
+      const result = { status: "none", available: false, currentVersion, checkedAt: Date.now() };
       await saveUpdateStatus(result);
       return result;
     }
     if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
 
     const release = await response.json();
-    const currentVersion = chrome.runtime.getManifest().version;
     const latestVersion = normalizeVersion(release.tag_name);
     const available = compareVersions(latestVersion, currentVersion) > 0;
+    const zipAsset = Array.isArray(release.assets)
+      ? release.assets.find((asset) => asset.name?.endsWith(".zip") && asset.browser_download_url) || release.assets[0]
+      : null;
+    const downloadUrl =
+      zipAsset?.browser_download_url ||
+      (release.tag_name
+        ? `https://github.com/de4d0t/Vamber-ai/releases/download/${release.tag_name}/vamber-ai-${release.tag_name}.zip`
+        : release.html_url);
+
     const result = {
       status: "checked",
       available,
       currentVersion,
       latestVersion,
       releaseUrl: release.html_url,
+      downloadUrl,
       releaseName: release.name || "",
       checkedAt: Date.now()
     };
@@ -74,17 +89,18 @@ async function checkForUpdate() {
   } catch (error) {
     const previous = await chrome.storage.local.get("githubUpdate");
     const cached = previous.githubUpdate;
-    if (cached?.available) {
+    if (cached?.available && compareVersions(cached.latestVersion, currentVersion) > 0) {
       await updateBadge(cached);
       return cached;
     }
     const result = {
       status: "error",
       available: false,
+      currentVersion,
       message: "Could not reach GitHub. Try again later.",
       checkedAt: Date.now()
     };
-    await chrome.storage.local.set({ githubUpdate: result });
+    await saveUpdateStatus(result);
     console.warn("Vamber AI release check failed:", error);
     return result;
   }
