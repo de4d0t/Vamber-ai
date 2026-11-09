@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SCRIPT_VERSION = "1.8.4";
+  const SCRIPT_VERSION = "1.8.5";
   const PROBE_EVENT = "__vamber_probe__";
   const PROBE_ATTR = "data-vamber-probe";
   const SUPERSEDE_EVENT = "__vamber_supersede__";
@@ -323,12 +323,21 @@
   const FLASH_MS = 500;
   const DELETE_TASK_TEXT =
     "Remove this element from the UI. Delete its JSX/HTML node in the source component and clean up any props, state, handlers, imports, or styles that become unused as a result, without breaking sibling layout.";
+  const FIX_TASK_TEXT =
+    "Debug and fix this element's behavior. Trace its event handlers (onClick/onSubmit/onChange), state updates, props, and any related async/API calls in the source component to resolve why it is not working as expected.";
+  const ACTION_COLORS = {
+    "": "#22d3ee",
+    d: "#f43f5e",
+    f: "#f59e0b",
+    a: "#a855f7"
+  };
   let settings = {
     detail: document.documentElement?.getAttribute(DETAIL_ATTR) || DEFAULTS.detail
   };
   let hoveredElement = null;
   let hoverOverlay = null;
-  let deleteKeyHeld = false;
+  let activeActionKey = "";
+  let copiedBatch = [];
   let pointer = { x: 0, y: 0 };
   let lastCandidateRefresh = 0;
   let transparentCandidates = [];
@@ -1123,8 +1132,14 @@
     host._hideTimer = window.setTimeout(() => toast.classList.remove("visible"), 2100);
   }
 
-  function isKeyD(event) {
-    return event.code === "KeyD" || (typeof event.key === "string" && event.key.toLowerCase() === "d");
+  function getActionKey(event) {
+    const code = event.code || "";
+    if (code === "KeyD") return "d";
+    if (code === "KeyF") return "f";
+    if (code === "KeyA") return "a";
+    const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+    if (key === "d" || key === "f" || key === "a") return key;
+    return "";
   }
 
   function isEditableTarget(node) {
@@ -1133,9 +1148,13 @@
     return Boolean(el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
   }
 
+  function currentHoverColor() {
+    return ACTION_COLORS[activeActionKey] || ACTION_COLORS[""];
+  }
+
   function updateHoverColor() {
     if (hoverOverlay?._vamberFrame) {
-      hoverOverlay._vamberFrame.style.borderColor = deleteKeyHeld ? "#f43f5e" : "#22d3ee";
+      hoverOverlay._vamberFrame.style.borderColor = currentHoverColor();
     }
   }
 
@@ -1146,7 +1165,7 @@
   }
 
   function showHover(element) {
-    const color = deleteKeyHeld ? "#f43f5e" : "#22d3ee";
+    const color = currentHoverColor();
     if (element !== hoveredElement) {
       clearHover();
       hoveredElement = element;
@@ -1170,14 +1189,56 @@
     return resolveTargetElement(overlay || element);
   }
 
+  function parseContextEntry(rawContext, taskText) {
+    const lines = rawContext.split("\n");
+    const headerTarget = (lines[0] || "").replace(/^## Element:\s*/, "");
+    const bodyLines = lines.slice(2);
+    const pageLine = bodyLines[0]?.startsWith("- Page:") ? bodyLines[0] : "";
+    const detailLines = pageLine ? bodyLines.slice(1) : bodyLines;
+    return { rawContext, headerTarget, pageLine, detailLines, taskText };
+  }
+
+  function formatBatchContext(batch) {
+    if (batch.length === 1) return batch[0].rawContext;
+    const firstPage = batch[0].pageLine;
+    const blocks = [`Task: ${batch[0].taskText || "[Describe_the_change]"}`];
+    batch.forEach((entry, idx) => {
+      const itemLines = [`## Element ${idx + 1}: ${entry.headerTarget}`];
+      if (entry.pageLine && (idx === 0 || entry.pageLine !== firstPage)) {
+        itemLines.push(entry.pageLine);
+      }
+      itemLines.push(...entry.detailLines);
+      blocks.push(itemLines.join("\n"));
+    });
+    return blocks.join("\n\n");
+  }
+
   async function selectElement(element, options = {}) {
     if (!element) return;
     clearHover();
-    const context = getElementContext(element, options.taskText || "[Describe_the_change]");
+    const taskText = options.taskText || "[Describe_the_change]";
+    const rawContext = getElementContext(element, taskText);
+    const entry = parseContextEntry(rawContext, taskText);
+
+    if (options.append) {
+      copiedBatch.push(entry);
+    } else {
+      copiedBatch = [entry];
+    }
+
+    const finalText = options.append ? formatBatchContext(copiedBatch) : rawContext;
+    const count = copiedBatch.length;
+    const toastTitle = options.append
+      ? (count > 1 ? `Appended element (#${count})` : "Added element (#1)")
+      : (options.toastTitle || "");
+    const toastMessage = options.append
+      ? `${count} ${count === 1 ? "element" : "elements"} in clipboard, ready to paste.`
+      : (options.toastMessage || "");
+
     try {
-      await copyText(context);
+      await copyText(finalText);
       flashSuccess(element, options.flashColor || "#22c55e");
-      showToast(true, options.toastTitle || "", options.toastMessage || "");
+      showToast(true, toastTitle, toastMessage);
     } catch (error) {
       console.warn("Vamber AI: clipboard copy failed.", error);
       showToast(false);
@@ -1192,7 +1253,7 @@
       const target = resolveTargetElement(overlay || element);
       if (target) showHover(target);
     } else {
-      deleteKeyHeld = false;
+      activeActionKey = "";
       clearHover();
     }
   }, { capture: true, signal });
@@ -1204,9 +1265,10 @@
       if (target) showHover(target);
       return;
     }
-    if (isKeyD(event) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    const actionKey = getActionKey(event);
+    if (actionKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (event.shiftKey && isEditableTarget(event.target) && !hoveredElement) return;
-      deleteKeyHeld = true;
+      activeActionKey = actionKey;
       if (event.shiftKey) {
         event.preventDefault();
         const target = resolvePointerTarget();
@@ -1216,23 +1278,23 @@
       return;
     }
     if (event.key === "Escape") {
-      deleteKeyHeld = false;
+      activeActionKey = "";
       clearHover();
     }
   }, { capture: true, signal });
 
   window.addEventListener("keyup", (event) => {
     if (event.key === "Shift") {
-      deleteKeyHeld = false;
+      activeActionKey = "";
       clearHover();
-    } else if (isKeyD(event)) {
-      deleteKeyHeld = false;
+    } else if (getActionKey(event) === activeActionKey) {
+      activeActionKey = "";
       updateHoverColor();
     }
   }, { capture: true, signal });
 
   window.addEventListener("blur", () => {
-    deleteKeyHeld = false;
+    activeActionKey = "";
     clearHover();
   }, { signal });
   window.addEventListener("scroll", refreshIndicators, { capture: true, signal });
@@ -1251,13 +1313,27 @@
     const target = getEventElement(event);
     const overlay = findTransparentOverlay(event.clientX, event.clientY, target);
     const resolved = resolveTargetElement(overlay || target);
-    if (deleteKeyHeld) {
-      deleteKeyHeld = false;
+    const action = activeActionKey;
+    activeActionKey = "";
+
+    if (action === "d") {
       void selectElement(resolved, {
         taskText: DELETE_TASK_TEXT,
         flashColor: "#f43f5e",
         toastTitle: "Copied delete task",
         toastMessage: "Remove-element task is ready to paste."
+      });
+    } else if (action === "f") {
+      void selectElement(resolved, {
+        taskText: FIX_TASK_TEXT,
+        flashColor: "#f59e0b",
+        toastTitle: "Copied fix-bug task",
+        toastMessage: "Debug & fix instruction is ready to paste."
+      });
+    } else if (action === "a") {
+      void selectElement(resolved, {
+        append: true,
+        flashColor: "#a855f7"
       });
     } else {
       void selectElement(resolved);

@@ -12,6 +12,8 @@ Pick an element on a live webpage and copy focused, AI-ready UI context to your 
 
 - **Shift + Left Click**: Instantly copy structured, token-efficient UI context (page route, viewport breakpoint & theme, React/Vue/Svelte component, usage-site source file, component props, clean CSS selector, and current computed styles).
 - **Shift + D + Left Click**: Hold `Shift + D` (outline turns rose-red) and left-click an element to copy its context pre-filled with a clean, AI-ready instruction to remove the element and clean up unused code.
+- **Shift + F + Left Click**: Hold `Shift + F` (outline turns amber) and left-click an element to copy its context pre-filled with an instruction to trace and fix its event handlers, state, and logic.
+- **Shift + A + Left Click**: Hold `Shift + A` (outline turns violet) and left-click additional elements to append them into a single multi-element clipboard payload (`Element 1`, `Element 2`…).
 - **Live Hover Preview**: Hold **Shift** to outline elements in cyan before selecting (`Esc` to dismiss).
 - **Compact & Detailed Modes**: Toggle between lightweight context and full DOM/attribute details.
 - **Visual Feedback**: Immediate flash and toast notification upon copying to clipboard.
