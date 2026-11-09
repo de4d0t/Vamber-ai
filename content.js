@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SCRIPT_VERSION = "1.8.2";
+  const SCRIPT_VERSION = "1.8.3";
   const PROBE_EVENT = "__vamber_probe__";
   const PROBE_ATTR = "data-vamber-probe";
   const SUPERSEDE_EVENT = "__vamber_supersede__";
@@ -328,6 +328,7 @@
   };
   let hoveredElement = null;
   let hoverOverlay = null;
+  let deleteKeyHeld = false;
   let pointer = { x: 0, y: 0 };
   let lastCandidateRefresh = 0;
   let transparentCandidates = [];
@@ -1076,6 +1077,7 @@
     const shadow = indicator.attachShadow({ mode: "closed" });
     const frame = document.createElement("div");
     frame.style.cssText = `position:absolute;inset:0;box-sizing:border-box;border:${width}px solid ${color};border-radius:3px;background:transparent;pointer-events:none;`;
+    indicator._vamberFrame = frame;
     shadow.appendChild(frame);
     document.documentElement.appendChild(indicator);
     placeIndicator(indicator, element);
@@ -1119,6 +1121,16 @@
     host._hideTimer = window.setTimeout(() => toast.classList.remove("visible"), 2100);
   }
 
+  function isKeyD(event) {
+    return event.code === "KeyD" || (typeof event.key === "string" && event.key.toLowerCase() === "d");
+  }
+
+  function updateHoverColor() {
+    if (hoverOverlay?._vamberFrame) {
+      hoverOverlay._vamberFrame.style.borderColor = deleteKeyHeld ? "#f43f5e" : "#22d3ee";
+    }
+  }
+
   function clearHover() {
     hoverOverlay?.remove();
     hoverOverlay = null;
@@ -1126,11 +1138,13 @@
   }
 
   function showHover(element) {
+    const color = deleteKeyHeld ? "#f43f5e" : "#22d3ee";
     if (element !== hoveredElement) {
       clearHover();
       hoveredElement = element;
-      hoverOverlay = createIndicator(element, "#22d3ee", 1);
+      hoverOverlay = createIndicator(element, color, 1);
     } else if (hoverOverlay) {
+      updateHoverColor();
       placeIndicator(hoverOverlay, element);
     }
   }
@@ -1171,6 +1185,7 @@
       const target = resolveTargetElement(overlay || element);
       if (target) showHover(target);
     } else {
+      deleteKeyHeld = false;
       clearHover();
     }
   }, { capture: true, signal });
@@ -1181,32 +1196,36 @@
       if (target) showHover(target);
       return;
     }
-    if (
-      event.altKey &&
-      !event.ctrlKey &&
-      !event.metaKey &&
-      !event.repeat &&
-      (event.code === "KeyD" || (typeof event.key === "string" && event.key.toLowerCase() === "d"))
-    ) {
-      const target = resolvePointerTarget();
-      if (target) {
+    if (isKeyD(event) && !event.ctrlKey && !event.metaKey) {
+      deleteKeyHeld = true;
+      if (event.altKey) {
         event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        void selectElement(target, {
-          taskPrompt: DELETE_TASK_PROMPT,
-          flashColor: "#f43f5e",
-          toastTitle: "Copied delete task",
-          toastMessage: "Remove-element task is ready to paste."
-        });
+        const target = resolvePointerTarget();
+        if (target) showHover(target);
+        else updateHoverColor();
       }
       return;
     }
-    if (event.key === "Escape") clearHover();
+    if (event.key === "Escape") {
+      deleteKeyHeld = false;
+      clearHover();
+    }
   }, { capture: true, signal });
 
-  window.addEventListener("keyup", (event) => { if (event.key === "Alt") clearHover(); }, { capture: true, signal });
-  window.addEventListener("blur", clearHover, { signal });
+  window.addEventListener("keyup", (event) => {
+    if (event.key === "Alt") {
+      deleteKeyHeld = false;
+      clearHover();
+    } else if (isKeyD(event)) {
+      deleteKeyHeld = false;
+      updateHoverColor();
+    }
+  }, { capture: true, signal });
+
+  window.addEventListener("blur", () => {
+    deleteKeyHeld = false;
+    clearHover();
+  }, { signal });
   window.addEventListener("scroll", refreshIndicators, { capture: true, signal });
   window.addEventListener("resize", refreshIndicators, { capture: true, signal });
 
@@ -1217,7 +1236,18 @@
     event.stopImmediatePropagation();
     const target = getEventElement(event);
     const overlay = findTransparentOverlay(event.clientX, event.clientY, target);
-    void selectElement(resolveTargetElement(overlay || target));
+    const resolved = resolveTargetElement(overlay || target);
+    if (deleteKeyHeld) {
+      deleteKeyHeld = false;
+      void selectElement(resolved, {
+        taskPrompt: DELETE_TASK_PROMPT,
+        flashColor: "#f43f5e",
+        toastTitle: "Copied delete task",
+        toastMessage: "Remove-element task is ready to paste."
+      });
+    } else {
+      void selectElement(resolved);
+    }
   }, { capture: true, signal });
 
 })();
