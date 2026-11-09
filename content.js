@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SCRIPT_VERSION = "1.8.8";
+  const SCRIPT_VERSION = "1.8.9";
   const PROBE_EVENT = "__vamber_probe__";
   const PROBE_ATTR = "data-vamber-probe";
   const SUPERSEDE_EVENT = "__vamber_supersede__";
@@ -321,16 +321,11 @@
 
   const DEFAULTS = { detail: "compact" };
   const FLASH_MS = 500;
+  const SELECT_COLOR = "#22c55e";
   const DELETE_TASK_TEXT =
     "Remove this element from the UI. Delete its JSX/HTML node in the source component and clean up any props, state, handlers, imports, or styles that become unused as a result, without breaking sibling layout.";
   const FIX_TASK_TEXT =
     "Debug and fix this element's behavior. Trace its event handlers (onClick/onSubmit/onChange), state updates, props, and any related async/API calls in the source component to resolve why it is not working as expected.";
-  const ACTION_COLORS = {
-    "": "#22d3ee",
-    d: "#f43f5e",
-    f: "#f59e0b",
-    a: "#a855f7"
-  };
   let settings = {
     detail: document.documentElement?.getAttribute(DETAIL_ATTR) || DEFAULTS.detail
   };
@@ -338,6 +333,7 @@
   let hoverOverlay = null;
   let activeActionKey = "";
   let copiedBatch = [];
+  let batchIndicators = [];
   let pointer = { x: 0, y: 0 };
   let lastCandidateRefresh = 0;
   let transparentCandidates = [];
@@ -376,6 +372,7 @@
       const currentActive = document.documentElement?.getAttribute(VERSION_ATTR);
       if (currentActive && compareVer(currentActive, SCRIPT_VERSION) > 0) {
         clearHover();
+        clearBatch();
         uiAbort.abort();
       }
     },
@@ -1148,36 +1145,39 @@
     return Boolean(el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
   }
 
-  function currentHoverColor() {
-    return ACTION_COLORS[activeActionKey] || ACTION_COLORS[""];
-  }
-
-  function updateHoverColor() {
-    if (hoverOverlay?._vamberFrame) {
-      hoverOverlay._vamberFrame.style.borderColor = currentHoverColor();
-    }
-  }
-
   function clearHover() {
     hoverOverlay?.remove();
     hoverOverlay = null;
     hoveredElement = null;
   }
 
+  function clearBatch() {
+    for (const item of batchIndicators) {
+      item.indicator?.remove();
+    }
+    batchIndicators = [];
+    copiedBatch = [];
+  }
+
   function showHover(element) {
-    const color = currentHoverColor();
     if (element !== hoveredElement) {
       clearHover();
       hoveredElement = element;
-      hoverOverlay = createIndicator(element, color, 1);
+      hoverOverlay = createIndicator(element, SELECT_COLOR, 1);
     } else if (hoverOverlay) {
-      updateHoverColor();
       placeIndicator(hoverOverlay, element);
     }
   }
 
   function refreshIndicators() {
     if (hoverOverlay && hoveredElement) placeIndicator(hoverOverlay, hoveredElement);
+    for (const item of batchIndicators) {
+      if (item.element?.isConnected && item.indicator) {
+        placeIndicator(item.indicator, item.element);
+      } else {
+        item.indicator?.remove();
+      }
+    }
   }
 
   function resolvePointerTarget() {
@@ -1199,8 +1199,7 @@
   }
 
   function formatBatchContext(batch) {
-    if (batch.length === 1) return batch[0].rawContext;
-    const firstPage = batch[0].pageLine;
+    const firstPage = batch[0]?.pageLine || "";
     const blocks = ["Task: [ __________ ]"];
     batch.forEach((entry, idx) => {
       const itemLines = [`## Element ${idx + 1}: ${entry.headerTarget}`];
@@ -1222,10 +1221,8 @@
 
     if (options.append) {
       copiedBatch.push(entry);
-    } else if (options.taskText) {
-      copiedBatch = [];
     } else {
-      copiedBatch = [entry];
+      clearBatch();
     }
 
     const finalText = options.append ? formatBatchContext(copiedBatch) : rawContext;
@@ -1234,12 +1231,17 @@
       ? (count > 1 ? `Appended element (#${count})` : "Added element (#1)")
       : (options.toastTitle || "");
     const toastMessage = options.append
-      ? `${count} ${count === 1 ? "element" : "elements"} in clipboard, ready to paste.`
+      ? `${count} ${count === 1 ? "element" : "elements"} in clipboard (Shift+Esc to clear).`
       : (options.toastMessage || "");
 
     try {
       await copyText(finalText);
-      flashSuccess(element, options.flashColor || "#22c55e");
+      if (options.append) {
+        const indicator = createIndicator(element, SELECT_COLOR, 2);
+        batchIndicators.push({ element, indicator });
+      } else {
+        flashSuccess(element, SELECT_COLOR);
+      }
       showToast(true, toastTitle, toastMessage);
     } catch (error) {
       console.warn("Vamber AI: clipboard copy failed.", error);
@@ -1275,13 +1277,17 @@
         event.preventDefault();
         const target = resolvePointerTarget();
         if (target) showHover(target);
-        else updateHoverColor();
       }
       return;
     }
     if (event.key === "Escape") {
       activeActionKey = "";
       clearHover();
+      if (event.shiftKey) {
+        event.preventDefault();
+        clearBatch();
+        showToast(true, "Multi-select reset", "Cleared selected elements. Ready from #1.");
+      }
     }
   }, { capture: true, signal });
 
@@ -1291,7 +1297,6 @@
       clearHover();
     } else if (getActionKey(event) === activeActionKey) {
       activeActionKey = "";
-      updateHoverColor();
     }
   }, { capture: true, signal });
 
@@ -1321,21 +1326,18 @@
     if (action === "d") {
       void selectElement(resolved, {
         taskText: DELETE_TASK_TEXT,
-        flashColor: "#f43f5e",
         toastTitle: "Copied delete task",
         toastMessage: "Remove-element task is ready to paste."
       });
     } else if (action === "f") {
       void selectElement(resolved, {
         taskText: FIX_TASK_TEXT,
-        flashColor: "#f59e0b",
         toastTitle: "Copied fix-bug task",
         toastMessage: "Debug & fix instruction is ready to paste."
       });
     } else if (action === "a") {
       void selectElement(resolved, {
-        append: true,
-        flashColor: "#a855f7"
+        append: true
       });
     } else {
       void selectElement(resolved);
