@@ -1,15 +1,19 @@
 const RELEASE_API = "https://api.github.com/repos/de4d0t/Vamber-ai/releases/latest";
+const RAW_CONTENT_URL = (tag) => `https://raw.githubusercontent.com/de4d0t/Vamber-ai/${tag}/content.js`;
 const RELEASE_CHECK_ALARM = "github-release-check";
 const CHECK_PERIOD_MINUTES = 60;
 const DEFAULT_TITLE = "Vamber AI — UI Context";
+const OTA_SCRIPT_IDS = ["vamber-ota-user", "vamber-ota-main"];
 
 chrome.runtime.onInstalled.addListener(() => {
   scheduleReleaseChecks();
+  restoreOrClearOtaScript();
   checkForUpdate();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   scheduleReleaseChecks();
+  restoreOrClearOtaScript();
   checkForUpdate();
 });
 
@@ -47,6 +51,78 @@ function scheduleReleaseChecks() {
   chrome.alarms.create(RELEASE_CHECK_ALARM, { periodInMinutes: CHECK_PERIOD_MINUTES });
 }
 
+async function clearOtaUserScripts() {
+  await chrome.storage.local.remove("otaContentScript");
+  if (!chrome.userScripts?.unregister) return;
+  try {
+    const existing = await chrome.userScripts.getScripts({ ids: OTA_SCRIPT_IDS });
+    if (existing.length) {
+      await chrome.userScripts.unregister({ ids: existing.map((s) => s.id) });
+    }
+  } catch {}
+}
+
+async function registerOtaUserScripts(code) {
+  if (!chrome.userScripts?.register || !code) return false;
+  try {
+    const existing = await chrome.userScripts.getScripts({ ids: OTA_SCRIPT_IDS });
+    if (existing.length) {
+      await chrome.userScripts.unregister({ ids: existing.map((s) => s.id) });
+    }
+    await chrome.userScripts.register([
+      {
+        id: "vamber-ota-user",
+        matches: ["http://*/*", "https://*/*"],
+        js: [{ code: `window.__vamberUserScriptWorld = true;\n${code}` }],
+        runAt: "document_idle",
+        allFrames: true,
+        world: "USER_SCRIPT"
+      },
+      {
+        id: "vamber-ota-main",
+        matches: ["http://*/*", "https://*/*"],
+        js: [{ code }],
+        runAt: "document_idle",
+        allFrames: true,
+        world: "MAIN"
+      }
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function restoreOrClearOtaScript() {
+  const currentVersion = chrome.runtime.getManifest().version;
+  const { otaContentScript } = await chrome.storage.local.get("otaContentScript");
+  if (!otaContentScript?.version || compareVersions(otaContentScript.version, currentVersion) <= 0) {
+    await clearOtaUserScripts();
+    return;
+  }
+  await registerOtaUserScripts(otaContentScript.code);
+}
+
+async function syncRemoteContentScript(tag, latestVersion) {
+  if (!tag) return false;
+  try {
+    const { otaContentScript } = await chrome.storage.local.get("otaContentScript");
+    if (otaContentScript?.version === latestVersion && otaContentScript?.code) {
+      return await registerOtaUserScripts(otaContentScript.code);
+    }
+    const response = await fetch(RAW_CONTENT_URL(tag), { cache: "no-store" });
+    if (!response.ok) return false;
+    const code = await response.text();
+    if (!code || !code.includes("__vamber_probe__")) return false;
+    await chrome.storage.local.set({
+      otaContentScript: { version: latestVersion, tag, code, syncedAt: Date.now() }
+    });
+    return await registerOtaUserScripts(code);
+  } catch {
+    return false;
+  }
+}
+
 async function checkForUpdate() {
   const currentVersion = chrome.runtime.getManifest().version;
   try {
@@ -74,9 +150,17 @@ async function checkForUpdate() {
         ? `https://github.com/de4d0t/Vamber-ai/releases/download/${release.tag_name}/vamber-ai-${release.tag_name}.zip`
         : release.html_url);
 
+    let otaSynced = false;
+    if (available) {
+      otaSynced = await syncRemoteContentScript(release.tag_name, latestVersion);
+    } else {
+      await clearOtaUserScripts();
+    }
+
     const result = {
       status: "checked",
       available,
+      otaSynced,
       currentVersion,
       latestVersion,
       releaseUrl: release.html_url,
@@ -114,8 +198,12 @@ async function saveUpdateStatus(status) {
 async function updateBadge(status) {
   if (status.available) {
     await chrome.action.setBadgeBackgroundColor({ color: "#06b6d4" });
-    await chrome.action.setBadgeText({ text: "NEW" });
-    await chrome.action.setTitle({ title: `Vamber AI — Update available: v${status.latestVersion}` });
+    await chrome.action.setBadgeText({ text: status.otaSynced ? "SYNC" : "NEW" });
+    await chrome.action.setTitle({
+      title: status.otaSynced
+        ? `Vamber AI — Auto-synced to v${status.latestVersion} (click to download full ZIP)`
+        : `Vamber AI — Update available: v${status.latestVersion}`
+    });
     return;
   }
   await chrome.action.setBadgeText({ text: "" });

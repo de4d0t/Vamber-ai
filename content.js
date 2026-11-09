@@ -1,8 +1,12 @@
 (() => {
   "use strict";
 
+  const SCRIPT_VERSION = "1.6.8";
   const PROBE_EVENT = "__vamber_probe__";
   const PROBE_ATTR = "data-vamber-probe";
+  const SUPERSEDE_EVENT = "__vamber_supersede__";
+  const VERSION_ATTR = "data-vamber-version";
+  const DETAIL_ATTR = "data-vamber-detail";
   const IS_EXTENSION_WORLD = typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
 
   const NOISE_COMPONENTS = new Set([
@@ -34,6 +38,16 @@
     "path", "circle", "rect", "line", "polyline", "polygon", "ellipse",
     "g", "use", "defs", "stop", "clippath", "mask", "tspan", "lineargradient", "radialgradient", "title", "desc"
   ]);
+
+  function compareVer(left, right) {
+    const a = String(left || "0").replace(/^v/i, "").split(".").map((n) => Number.parseInt(n, 10) || 0);
+    const b = String(right || "0").replace(/^v/i, "").split(".").map((n) => Number.parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      const diff = (a[i] || 0) - (b[i] || 0);
+      if (diff !== 0) return Math.sign(diff);
+    }
+    return 0;
+  }
 
   function cleanSourcePath(rawFile, lineNumber) {
     if (!rawFile || typeof rawFile !== "string") return "";
@@ -201,8 +215,22 @@
     return null;
   }
 
-  // When running in MAIN world, only listen for synchronous probe requests from ISOLATED world.
-  if (!IS_EXTENSION_WORLD) {
+  // In MAIN world (where window === window.top's page context and no extension runtime exists):
+  // Only attach the synchronous probe responder unless running as an OTA USER_SCRIPT.
+  const isMainPageWorld = !IS_EXTENSION_WORLD && (() => {
+    try {
+      // Detect if we are in MAIN world vs USER_SCRIPT isolated world:
+      // MAIN world shares expando properties on document.documentElement with inline script / page context
+      return !window.__vamberUserScriptWorld;
+    } catch {
+      return true;
+    }
+  })();
+
+  if (isMainPageWorld) {
+    window.__vamberProbeAbort?.abort();
+    const probeAbort = new AbortController();
+    window.__vamberProbeAbort = probeAbort;
     document.addEventListener(
       PROBE_EVENT,
       (event) => {
@@ -214,14 +242,16 @@
           if (meta) target.setAttribute(PROBE_ATTR, JSON.stringify(meta));
         } catch {}
       },
-      true
+      { capture: true, signal: probeAbort.signal }
     );
     return;
   }
 
   const DEFAULTS = { detail: "compact" };
   const FLASH_MS = 500;
-  let settings = { ...DEFAULTS };
+  let settings = {
+    detail: document.documentElement?.getAttribute(DETAIL_ATTR) || DEFAULTS.detail
+  };
   let hoveredElement = null;
   let hoverOverlay = null;
   let pointer = { x: 0, y: 0 };
@@ -229,12 +259,44 @@
   let transparentCandidates = [];
 
   if (typeof chrome !== "undefined" && chrome.storage?.sync) {
-    chrome.storage.sync.get(DEFAULTS, (saved) => { settings = { ...DEFAULTS, ...saved }; });
+    chrome.storage.sync.get(DEFAULTS, (saved) => {
+      settings = { ...DEFAULTS, ...saved };
+      document.documentElement?.setAttribute(DETAIL_ATTR, settings.detail);
+    });
     chrome.storage.onChanged?.addListener((changes, area) => {
       if (area !== "sync") return;
-      if (changes.detail) settings.detail = changes.detail.newValue || DEFAULTS.detail;
+      if (changes.detail) {
+        settings.detail = changes.detail.newValue || DEFAULTS.detail;
+        document.documentElement?.setAttribute(DETAIL_ATTR, settings.detail);
+      }
     });
   }
+
+  // If a newer OTA version of Vamber AI is already active on this page, let it handle UI events.
+  const activeVersion = document.documentElement?.getAttribute(VERSION_ATTR);
+  if (activeVersion && compareVer(activeVersion, SCRIPT_VERSION) > 0) {
+    return;
+  }
+
+  window.__vamberUiAbort?.abort();
+  const uiAbort = new AbortController();
+  window.__vamberUiAbort = uiAbort;
+  const { signal } = uiAbort;
+
+  document.documentElement?.setAttribute(VERSION_ATTR, SCRIPT_VERSION);
+  document.dispatchEvent(new CustomEvent(SUPERSEDE_EVENT, { detail: SCRIPT_VERSION }));
+
+  document.addEventListener(
+    SUPERSEDE_EVENT,
+    () => {
+      const currentActive = document.documentElement?.getAttribute(VERSION_ATTR);
+      if (currentActive && compareVer(currentActive, SCRIPT_VERSION) > 0) {
+        clearHover();
+        uiAbort.abort();
+      }
+    },
+    { signal }
+  );
 
   function shorten(value, limit) {
     const normalized = String(value || "").replace(/\s+/g, " ").trim();
@@ -271,7 +333,6 @@
     if (!filtered.length) return "";
     if (isDetailed) return shorten(filtered.join(" "), 600);
 
-    // In compact mode, strip state-variant noise (hover:, focus:, dark:, etc.) if there are plenty of classes
     const baseClasses = filtered.filter(
       (c) => !/^(hover|focus|focus-visible|focus-within|active|disabled|visited|dark|light|group-hover|peer-hover|placeholder|motion-safe|motion-reduce|supports|aria-|data-):/.test(c) &&
              !/^(transition|duration-|ease-|delay-|animate-)/.test(c)
@@ -312,7 +373,7 @@
       const dataIcon = node.getAttribute?.("data-lucide") || node.getAttribute?.("data-icon") || node.getAttribute?.("data-feather");
       if (dataIcon) return dataIcon;
       for (const cls of node.classList || []) {
-        if (/^(lucide|fa|bi|ri|tabler-icon|heroicon| material-icons)-.+/.test(cls) && cls !== "fa-solid" && cls !== "fa-regular" && cls !== "fa-brands") {
+        if (/^(lucide|fa|bi|ri|tabler-icon|heroicon|material-icons)-.+/.test(cls) && cls !== "fa-solid" && cls !== "fa-regular" && cls !== "fa-brands") {
           return cls;
         }
       }
@@ -371,7 +432,6 @@
   }
 
   function findNearbyAnchor(element) {
-    // Look at adjacent siblings or closest section/card heading when the target itself has no text
     const prev = element.previousElementSibling;
     if (prev) {
       const t = shorten(prev.innerText || prev.textContent, 50);
@@ -558,7 +618,6 @@
 
   function resolveTargetElement(rawElement) {
     if (!rawElement) return null;
-    // Lift internal SVG primitives (<path>, <circle>, <g>, etc.) up to the enclosing <svg>
     if (
       rawElement.namespaceURI === "http://www.w3.org/2000/svg" &&
       SVG_CHILD_TAGS.has(rawElement.tagName.toLowerCase())
@@ -569,7 +628,8 @@
   }
 
   function getElementContext(element) {
-    const isDetailed = settings.detail === "detailed";
+    const currentDetail = document.documentElement?.getAttribute(DETAIL_ATTR) || settings.detail;
+    const isDetailed = currentDetail === "detailed";
     const tag = element.tagName.toLowerCase();
     const selector = getUniqueSelector(element);
 
@@ -629,7 +689,6 @@
       lines.push(`- Parent: \`${parentSelector}\`${parentLabel && parentLabel !== primaryLabel ? ` "${parentLabel}"` : ""}`);
     }
 
-    // Only emit Text if it adds new information not already shown in the header's primaryLabel
     if (directText && directText !== primaryLabel) {
       lines.push(`- Text: "${directText}"`);
     } else if (!primaryLabel && !stableId && !iconHint) {
@@ -637,7 +696,6 @@
       if (near) lines.push(`- Near: "${near}"`);
     }
 
-    // Collect non-redundant attributes
     const attributes = [];
     const attrKeys = [
       "data-testid", "data-test", "data-cy", "data-slot", "data-variant", "data-state",
@@ -717,8 +775,6 @@
     return resolveTargetElement(raw);
   }
 
-  // Some canvas-based editors put instruction chips over the canvas with
-  // pointer-events:none. The browser then reports only the canvas underneath.
   function findTransparentOverlay(x, y, underlying) {
     if (!underlying) return null;
     const base = underlying.getBoundingClientRect();
@@ -739,7 +795,6 @@
       lastCandidateRefresh = now;
     }
 
-    // A small hit slop keeps a transparent HTML overlay stable at rounded edges.
     if (hoveredElement && transparentCandidates.some(({ element }) => element === hoveredElement)) {
       const rect = hoveredElement.getBoundingClientRect();
       const slop = 6;
@@ -894,7 +949,7 @@
     } else {
       clearHover();
     }
-  }, true);
+  }, { capture: true, signal });
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "Alt") {
@@ -907,11 +962,12 @@
       }
     }
     if (event.key === "Escape") clearHover();
-  }, true);
-  window.addEventListener("keyup", (event) => { if (event.key === "Alt") clearHover(); }, true);
-  window.addEventListener("blur", clearHover);
-  window.addEventListener("scroll", refreshIndicators, true);
-  window.addEventListener("resize", refreshIndicators, true);
+  }, { capture: true, signal });
+
+  window.addEventListener("keyup", (event) => { if (event.key === "Alt") clearHover(); }, { capture: true, signal });
+  window.addEventListener("blur", clearHover, { signal });
+  window.addEventListener("scroll", refreshIndicators, { capture: true, signal });
+  window.addEventListener("resize", refreshIndicators, { capture: true, signal });
 
   document.addEventListener("click", (event) => {
     if (!event.altKey || event.button !== 0) return;
@@ -921,6 +977,6 @@
     const target = getEventElement(event);
     const overlay = findTransparentOverlay(event.clientX, event.clientY, target);
     void selectElement(resolveTargetElement(overlay || target));
-  }, true);
+  }, { capture: true, signal });
 
 })();

@@ -22,7 +22,7 @@ jobs:
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           VERSION="${TAG_NAME#v}"
           ZIP_NAME="vamber-ai-${TAG_NAME}.zip"
-          zip -r "${ZIP_NAME}" manifest.json background.js content.js popup.html popup.css popup.js icons/
+          zip -r "${ZIP_NAME}" manifest.json background.js content.js popup.html popup.css popup.js Update.bat icons/
           echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
 
       - name: Create Release

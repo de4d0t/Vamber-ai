@@ -1,12 +1,14 @@
 const DEFAULTS = { detail: "compact" };
 const detailOptions = Array.from(document.querySelectorAll("[data-detail]"));
 const currentVersion = chrome.runtime.getManifest().version;
+const versionLabel = document.getElementById("currentVersion");
+const reloadButton = document.getElementById("reloadButton");
 const updateButton = document.getElementById("updateButton");
 const detailHint = document.getElementById("detailHint");
 let selectedDetail = DEFAULTS.detail;
 let statusTimer = null;
 
-document.getElementById("currentVersion").textContent = `v${currentVersion}`;
+versionLabel.textContent = `v${currentVersion}`;
 
 chrome.storage.sync.get(DEFAULTS, (settings) => {
   selectDetail(settings.detail || DEFAULTS.detail, false);
@@ -15,6 +17,11 @@ chrome.storage.sync.get(DEFAULTS, (settings) => {
 for (const button of detailOptions) {
   button.addEventListener("click", () => selectDetail(button.dataset.detail, true));
 }
+
+reloadButton?.addEventListener("click", () => {
+  showTemporaryStatus("Reloading extension…", 1000);
+  window.setTimeout(() => chrome.runtime.reload(), 120);
+});
 
 updateButton.addEventListener("click", () => {
   const targetUrl = updateButton.dataset.downloadUrl || updateButton.dataset.releaseUrl;
@@ -68,10 +75,12 @@ function triggerCheck(downloadIfAvailable = false) {
 
     if (result?.available) {
       const url = result.downloadUrl || result.releaseUrl;
-      if (downloadIfAvailable && url) {
+      if (result.otaSynced && !downloadIfAvailable) {
+        showTemporaryStatus(`Auto-synced v${result.latestVersion} from GitHub!`);
+      } else if (downloadIfAvailable && url) {
         startDownload(url, result.latestVersion);
       } else {
-        showTemporaryStatus(`Update v${result.latestVersion} is ready to download!`);
+        showTemporaryStatus(`Update v${result.latestVersion} is ready!`);
       }
     } else if (result?.status === "error") {
       showTemporaryStatus("Could not reach GitHub right now");
@@ -114,6 +123,7 @@ function renderUpdateStatus(result) {
   delete updateButton.dataset.downloadUrl;
   delete updateButton.dataset.latestVersion;
   updateButton.disabled = false;
+  versionLabel.textContent = `v${currentVersion}`;
 
   if (!result || result.status === "error") {
     updateButton.title = result?.message || "Could not check GitHub right now. Click to check again.";
@@ -126,7 +136,12 @@ function renderUpdateStatus(result) {
     updateButton.dataset.releaseUrl = result.releaseUrl || "";
     updateButton.dataset.downloadUrl = result.downloadUrl || result.releaseUrl || "";
     updateButton.dataset.latestVersion = result.latestVersion || "";
-    updateButton.title = `Download Vamber AI v${result.latestVersion} (.zip)`;
+    if (result.otaSynced) {
+      versionLabel.textContent = `v${currentVersion} → v${result.latestVersion}`;
+      updateButton.title = `Auto-synced v${result.latestVersion} from GitHub! Click to download full ZIP.`;
+    } else {
+      updateButton.title = `Download Vamber AI v${result.latestVersion} (.zip)`;
+    }
     updateButton.setAttribute("aria-label", updateButton.title);
     return;
   }

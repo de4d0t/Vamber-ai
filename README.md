@@ -14,7 +14,7 @@ Pick an element on a live webpage and copy focused, AI-ready UI context to your 
 - **Live Hover Preview**: Hold **Alt** to outline elements in cyan before selecting (`Esc` to dismiss).
 - **Compact & Detailed Modes**: Toggle between lightweight context and full DOM/attribute details.
 - **Visual Feedback**: Immediate flash and toast notification upon copying to clipboard.
-- **Update Alerts**: Automatic toolbar badge notification when a newer release is published.
+- **Update Alerts & Auto-Sync**: Automatic toolbar badge notification, OTA `content.js` sync from GitHub, one-click `Update.bat` updater, and an in-popup **Reload** button.
 
 ## Install in Chrome
 
@@ -26,7 +26,7 @@ Vamber AI is a plain Manifest V3 extension and does not need a build step.
 4. Select **Load unpacked** and choose the extension folder.
 5. Pin Vamber AI from Chrome's Extensions menu for quick access.
 
-To load a newer downloaded version, replace the extension files and select **Reload** on `chrome://extensions`.
+To update later without opening `chrome://extensions`, double-click `Update.bat` inside the extension folder (or `git pull`) and click the **Reload** icon right inside the Vamber AI popup.
 
 ## Use it
 

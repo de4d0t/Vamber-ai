@@ -2,13 +2,14 @@
   "manifest_version": 3,
   "name": "Vamber AI — UI Context",
   "short_name": "Vamber AI",
-  "version": "1.6.7",
+  "version": "1.6.8",
   "description": "Inspect webpage elements and copy focused, AI-ready context.",
   "author": "Vamber AI",
   "permissions": [
     "clipboardWrite",
     "storage",
-    "alarms"
+    "alarms",
+    "userScripts"
   ],
   "host_permissions": [
     "http://*/*",
