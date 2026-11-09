@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SCRIPT_VERSION = "1.8.7";
+  const SCRIPT_VERSION = "1.8.8";
   const PROBE_EVENT = "__vamber_probe__";
   const PROBE_ATTR = "data-vamber-probe";
   const SUPERSEDE_EVENT = "__vamber_supersede__";
@@ -1201,7 +1201,7 @@
   function formatBatchContext(batch) {
     if (batch.length === 1) return batch[0].rawContext;
     const firstPage = batch[0].pageLine;
-    const blocks = [`Task: ${batch[0].taskText || "[ __________ ]"}`];
+    const blocks = ["Task: [ __________ ]"];
     batch.forEach((entry, idx) => {
       const itemLines = [`## Element ${idx + 1}: ${entry.headerTarget}`];
       if (entry.pageLine && (idx === 0 || entry.pageLine !== firstPage)) {
@@ -1216,12 +1216,14 @@
   async function selectElement(element, options = {}) {
     if (!element) return;
     clearHover();
-    const taskText = options.taskText || "[ __________ ]";
+    const taskText = options.append ? "[ __________ ]" : (options.taskText || "[ __________ ]");
     const rawContext = getElementContext(element, taskText);
     const entry = parseContextEntry(rawContext, taskText);
 
     if (options.append) {
       copiedBatch.push(entry);
+    } else if (options.taskText) {
+      copiedBatch = [];
     } else {
       copiedBatch = [entry];
     }
