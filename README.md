@@ -10,7 +10,7 @@ Pick an element on a live webpage and copy focused, AI-ready UI context to your 
 
 ## Features
 
-- **Alt + Left Click**: Instantly copy structured, token-efficient UI context (page route, React/Vue/Svelte component & source file, clean CSS selector, and task prompt).
+- **Alt + Left Click**: Instantly copy structured, token-efficient UI context (page route, viewport breakpoint & theme, React/Vue/Svelte component, usage-site source file, component props, clean CSS selector, and current computed styles).
 - **Live Hover Preview**: Hold **Alt** to outline elements in cyan before selecting (`Esc` to dismiss).
 - **Compact & Detailed Modes**: Toggle between lightweight context and full DOM/attribute details.
 - **Visual Feedback**: Immediate flash and toast notification upon copying to clipboard.
@@ -31,8 +31,25 @@ To load a newer downloaded version, replace the extension files and click the **
 ## Use it
 
 1. Hold **Alt** and move the pointer over the target to preview it.
-2. Keep holding **Alt** and left-click to copy the context. Replace `Task: [Describe_the_change]` with the requested change before sending it to your coding assistant.
+2. Keep holding **Alt** and left-click to copy the context. Paste one or more copied blocks into your coding assistant and write your requested change above them.
 3. Choose **Compact** or **Detailed** in the popup to control how much context is copied.
+
+### What the agent receives
+
+```
+## Element: button "Save changes"
+- Page: `/settings` | Viewport: 1280px (xl) | Theme: dark
+- Source: `src/app/settings/settings-form.tsx:88` (SettingsPage > SettingsForm > Button)
+- Defined in: `src/components/ui/button.tsx:45`
+- Props (Button): variant="outline" size="sm"
+- Selector: `button[data-slot="button"]`
+- Classes: `inline-flex items-center px-4 md:px-6`
+- Style: 143×34px | font 14px/500 | color #fafafa | bg #18181b | p 8px 16px | radius 6px
+```
+
+- **Source** points to where the element is *used*; when it lives in a shared UI kit (`components/ui`, `primitives`…), **Defined in** shows the primitive's file. Otherwise **Used in** shows where the owning component is rendered.
+- Line numbers prefixed with `~` come from React 19 debug stacks and may be slightly off.
+- Text is copied as written in the source (CSS `text-transform` is ignored), so it can be searched directly in the codebase.
 
 The copied context may include the element's text, classes, accessibility labels, link address, data attributes, and—when Detailed mode is selected—a shortened HTML snippet. Review it before sharing, especially when selecting elements near private or account data.
 

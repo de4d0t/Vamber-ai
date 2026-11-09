@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SCRIPT_VERSION = "1.7.1";
+  const SCRIPT_VERSION = "1.8.0";
   const PROBE_EVENT = "__vamber_probe__";
   const PROBE_ATTR = "data-vamber-probe";
   const SUPERSEDE_EVENT = "__vamber_supersede__";
@@ -75,11 +75,59 @@
     for (const line of stack.split("\n")) {
       const match = line.match(/(?:https?:\/\/[^/\s]+\/|webpack-internal:\/\/\/|\/@fs\/)?([^\s():?]+\.(?:tsx|ts|jsx|js|vue|svelte))(?:\?[^\s:)]*)?:(\d+)(?::\d+)?/i);
       if (match) {
-        const cleaned = cleanSourcePath(match[1], match[2]);
+        // Stack frames point at the transpiled module, so the line is only approximate ("~").
+        const cleaned = cleanSourcePath(match[1], match[2] ? `~${match[2]}` : "");
         if (cleaned) return cleaned;
       }
     }
     return "";
+  }
+
+  // Shared UI-kit folders (shadcn `components/ui`, design systems...). An element defined there is
+  // rarely what the user wants to edit; the call site that renders it is.
+  const PRIMITIVE_PATH = /(^|\/)(ui|primitives?|design-system|atoms)\//i;
+  const sourceFile = (source) => String(source || "").replace(/:~?\d+$/, "");
+
+  function pushSource(list, source) {
+    if (!source) return;
+    if (list.length && sourceFile(list[list.length - 1]) === sourceFile(source)) return;
+    list.push(source);
+  }
+
+  // `list` is ordered innermost-first: [where the DOM node is written, where its owner is used, ...]
+  function pickSources(list) {
+    if (!list.length) return { source: "" };
+    const first = list[0];
+    if (PRIMITIVE_PATH.test(sourceFile(first))) {
+      const usage = list.find((s) => !PRIMITIVE_PATH.test(sourceFile(s)));
+      if (usage) return { source: usage, definedIn: first };
+    }
+    return { source: first, usedIn: list[1] || "" };
+  }
+
+  const SKIP_PROP = /^(children|className|class|style|key|ref|as|asChild|id|tabIndex|dangerouslySetInnerHTML|on[A-Z].*|aria-.*|data-.*|render[A-Z]?.*)$/;
+  const SENSITIVE_PROP = /password|token|secret|apikey/i;
+
+  function formatProps(name, props) {
+    if (!name || !props || typeof props !== "object") return null;
+    const out = [];
+    try {
+      for (const key of Object.keys(props)) {
+        if (out.length >= 6) break;
+        if (SKIP_PROP.test(key) || SENSITIVE_PROP.test(key)) continue;
+        const value = props[key];
+        if (typeof value === "string") {
+          const text = value.trim();
+          if (!text || text.length > 40 || /[\n\r]/.test(text)) continue;
+          out.push(`${key}="${text.replace(/"/g, "\\\"")}"`);
+        } else if (typeof value === "number" && Number.isFinite(value)) {
+          out.push(`${key}={${value}}`);
+        } else if (value === true) {
+          out.push(key);
+        }
+      }
+    } catch {}
+    return out.length ? { name, text: out.join(" ") } : null;
   }
 
   function normalizeComponentName(rawName) {
@@ -133,36 +181,52 @@
     }
 
     if (fiber) {
+      const sourceOf = (f) => {
+        const dbg = f._debugSource;
+        if (dbg?.fileName) {
+          const cleaned = cleanSourcePath(dbg.fileName, dbg.lineNumber);
+          if (cleaned) return cleaned;
+        }
+        return f._debugStack?.stack ? parseStackSource(f._debugStack.stack) : "";
+      };
+
       const collectFromChain = (startFiber, stepKey) => {
         const names = [];
         const seen = new Set();
-        let source = "";
-        for (let curr = startFiber, steps = 0; curr && steps < 35 && names.length < 5; curr = curr[stepKey], steps++) {
-          if (!source) {
-            const dbg = curr._debugSource || curr._debugOwner?._debugSource;
-            if (dbg?.fileName) source = cleanSourcePath(dbg.fileName, dbg.lineNumber);
-            if (!source && curr._debugStack?.stack) source = parseStackSource(curr._debugStack.stack);
-          }
-          const clean = normalizeComponentName(getReactTypeName(curr.type));
-          if (clean && !seen.has(clean)) {
-            names.push(clean);
-            seen.add(clean);
+        const sources = [];
+        let props = null;
+        for (
+          let curr = startFiber, steps = 0;
+          curr && steps < 35 && (names.length < 5 || sources.length < 4);
+          curr = curr[stepKey], steps++
+        ) {
+          if (sources.length < 4) pushSource(sources, sourceOf(curr));
+          if (names.length < 5) {
+            const clean = normalizeComponentName(getReactTypeName(curr.type));
+            if (clean && !seen.has(clean)) {
+              if (!names.length) props = formatProps(clean, curr.memoizedProps);
+              names.push(clean);
+              seen.add(clean);
+            }
           }
         }
-        return { names: names.reverse(), source };
+        return { names: names.reverse(), sources, props };
       };
 
       const ownerResult = collectFromChain(fiber, "_debugOwner");
-      const returnResult = ownerResult.names.length < 2 ? collectFromChain(fiber, "return") : null;
-      const finalNames = ownerResult.names.length >= (returnResult?.names.length || 0)
-        ? ownerResult.names
-        : returnResult.names;
-      const finalSource = ownerResult.source || returnResult?.source || "";
+      const returnResult = ownerResult.names.length < 2 || !ownerResult.sources.length
+        ? collectFromChain(fiber, "return")
+        : null;
+      const useReturn = Boolean(returnResult && returnResult.names.length > ownerResult.names.length);
+      const finalNames = useReturn ? returnResult.names : ownerResult.names;
+      const finalProps = useReturn ? returnResult.props : ownerResult.props;
+      const finalSources = ownerResult.sources.length ? ownerResult.sources : (returnResult?.sources || []);
 
-      if (finalNames.length || finalSource) {
+      if (finalNames.length || finalSources.length) {
         return {
           component: finalNames.slice(-4).join(" > "),
-          source: finalSource
+          ...pickSources(finalSources),
+          props: finalProps
         };
       }
     }
@@ -172,18 +236,26 @@
       if (el.__vueParentComponent) {
         const names = [];
         const seen = new Set();
-        let source = "";
-        for (let comp = el.__vueParentComponent, steps = 0; comp && steps < 15 && names.length < 4; comp = comp.parent, steps++) {
+        const sources = [];
+        let props = null;
+        for (
+          let comp = el.__vueParentComponent, steps = 0;
+          comp && steps < 15 && (names.length < 4 || sources.length < 4);
+          comp = comp.parent, steps++
+        ) {
           const file = comp.type?.__file || "";
-          if (!source && file) source = cleanSourcePath(file);
+          if (sources.length < 4) pushSource(sources, cleanSourcePath(file));
           const rawName = comp.type?.__name || comp.type?.name || (file ? file.split("/").pop().replace(/\.vue$/i, "") : "");
-          if (rawName && !seen.has(rawName) && !/^(Transition|KeepAlive|Teleport|Suspense|RouterView|RouterLink)$/.test(rawName)) {
+          if (names.length < 4 && rawName && !seen.has(rawName) && !/^(Transition|KeepAlive|Teleport|Suspense|RouterView|RouterLink)$/.test(rawName)) {
+            if (!names.length) props = formatProps(rawName, comp.props);
             names.push(rawName);
             seen.add(rawName);
           }
         }
         names.reverse();
-        if (names.length || source) return { component: names.join(" > "), source };
+        if (names.length || sources.length) {
+          return { component: names.join(" > "), ...pickSources(sources), props };
+        }
       }
 
       if (el.__vue__) {
@@ -303,6 +375,122 @@
     return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
   }
 
+  // Reads text as it is written in the source code. Unlike `innerText`, this ignores CSS
+  // `text-transform` (e.g. Tailwind `uppercase`), so the result stays greppable in the codebase.
+  function readText(node, limit = 300) {
+    if (!node) return "";
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const parts = [];
+    let length = 0;
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text && length < limit; text = walker.nextNode()) {
+      const value = text.nodeValue?.trim();
+      if (!value || text.parentElement?.closest("script, style, noscript, template")) continue;
+      parts.push(value);
+      length += value.length + 1;
+    }
+    return parts.join(" ");
+  }
+
+  function toHexColor(color) {
+    const match = String(color || "").match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+)(%?))?\s*\)$/);
+    if (!match) return shorten(color, 40);
+    const alpha = match[4] === undefined ? 1 : Number(match[4]) / (match[5] ? 100 : 1);
+    if (alpha === 0) return "transparent";
+    const hex = [match[1], match[2], match[3]]
+      .map((v) => Math.min(255, Math.round(Number(v))).toString(16).padStart(2, "0"))
+      .join("");
+    return alpha < 1 ? `#${hex}/${Math.round(alpha * 100)}%` : `#${hex}`;
+  }
+
+  function boxShorthand(top, right, bottom, left) {
+    const v = [top, right, bottom, left].map((x) => (x === "0px" ? "0" : x));
+    if (v.every((x) => x === "0")) return "";
+    if (v.every((x) => x === v[0])) return v[0];
+    if (v[0] === v[2] && v[1] === v[3]) return `${v[0]} ${v[1]}`;
+    if (v[1] === v[3]) return `${v[0]} ${v[1]} ${v[2]}`;
+    return v.join(" ");
+  }
+
+  // Current visual values, so the agent can map "make it bigger / darker" to real tokens.
+  function describeStyle(element, hasText, isDetailed) {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const isSvg = element.namespaceURI === "http://www.w3.org/2000/svg";
+    const out = [`${Math.round(rect.width)}×${Math.round(rect.height)}px`];
+
+    if (hasText) {
+      let font = `font ${style.fontSize}/${style.fontWeight}`;
+      if (isDetailed && style.lineHeight !== "normal") font += ` lh ${style.lineHeight}`;
+      if (isDetailed && style.letterSpacing !== "normal") font += ` ls ${style.letterSpacing}`;
+      out.push(font);
+      if (isDetailed) out.push(`family ${shorten(style.fontFamily.split(",")[0].replace(/["']/g, ""), 30)}`);
+    }
+    if (hasText || isSvg) out.push(`color ${toHexColor(style.color)}`);
+
+    const bg = toHexColor(style.backgroundColor);
+    if (bg !== "transparent") out.push(`bg ${bg}`);
+    if (style.backgroundImage && style.backgroundImage !== "none") {
+      out.push(/gradient\(/.test(style.backgroundImage) ? `bg-image ${shorten(style.backgroundImage, 90)}` : "bg-image url(…)");
+    }
+
+    const padding = boxShorthand(style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft);
+    if (padding) out.push(`p ${padding}`);
+    const margin = boxShorthand(style.marginTop, style.marginRight, style.marginBottom, style.marginLeft);
+    if (margin) out.push(`m ${margin}`);
+    if (/flex|grid/.test(style.display) && style.gap && !/^(normal|0px)( normal| 0px)?$/.test(style.gap)) {
+      out.push(`gap ${style.gap}`);
+    }
+
+    const sides = [
+      ["t", style.borderTopWidth, style.borderTopStyle, style.borderTopColor],
+      ["r", style.borderRightWidth, style.borderRightStyle, style.borderRightColor],
+      ["b", style.borderBottomWidth, style.borderBottomStyle, style.borderBottomColor],
+      ["l", style.borderLeftWidth, style.borderLeftStyle, style.borderLeftColor]
+    ].filter(([, width, lineStyle]) => Number.parseFloat(width) > 0 && lineStyle !== "none");
+    if (sides.length === 4 && sides.every((s) => s[1] === sides[0][1] && s[3] === sides[0][3])) {
+      out.push(`border ${sides[0][1]} ${sides[0][2]} ${toHexColor(sides[0][3])}`);
+    } else {
+      for (const [side, width, lineStyle, color] of sides) out.push(`border-${side} ${width} ${lineStyle} ${toHexColor(color)}`);
+    }
+
+    if (style.borderRadius && !/^0px( 0px)*$/.test(style.borderRadius)) out.push(`radius ${style.borderRadius}`);
+    if (style.boxShadow && style.boxShadow !== "none") out.push(isDetailed ? `shadow ${shorten(style.boxShadow, 90)}` : "shadow");
+    if (Number(style.opacity) < 1) out.push(`opacity ${style.opacity}`);
+
+    return shorten(out.join(" | "), isDetailed ? 420 : 260);
+  }
+
+  function detectTheme() {
+    for (const root of [document.documentElement, document.body].filter(Boolean)) {
+      if (root.classList.contains("dark")) return "dark";
+      if (root.classList.contains("light")) return "light";
+      for (const attr of ["data-theme", "data-mode", "data-color-mode", "data-color-scheme", "data-bs-theme"]) {
+        const value = root.getAttribute(attr)?.trim();
+        if (value && value.length < 30) return value;
+      }
+    }
+    try {
+      if (window.matchMedia?.("(prefers-color-scheme: dark)").matches && document.querySelector("[class*='dark:']")) {
+        return "dark (system)";
+      }
+    } catch {}
+    return "";
+  }
+
+  // Viewport + active Tailwind-style breakpoint, so the agent edits the right responsive variant.
+  function describeViewport() {
+    const width = window.innerWidth;
+    let usesBreakpoints = false;
+    try {
+      usesBreakpoints = Boolean(document.querySelector("[class*='sm:'], [class*='md:'], [class*='lg:'], [class*='xl:']"));
+    } catch {}
+    if (!usesBreakpoints) return `${width}px`;
+    const breakpoint = width >= 1536 ? "2xl" : width >= 1280 ? "xl" : width >= 1024 ? "lg" : width >= 768 ? "md" : width >= 640 ? "sm" : "< sm";
+    return `${width}px (${breakpoint})`;
+  }
+
   function isStableId(id) {
     if (!id || typeof id !== "string" || id.length > 64) return false;
     if (id.includes(":")) return false;
@@ -385,13 +573,26 @@
   }
 
   function findTooltipText(element) {
+    // An ancestor's title/aria-label only describes this element when it is the element itself,
+    // an interactive wrapper (button, link...), or a close parent of a text-less node (icon).
+    const hasOwnText = Boolean(readText(element, 20).trim());
+    const describesElement = (host) => {
+      if (!host) return false;
+      if (host === element) return true;
+      if (host.matches("button, a, [role='button'], [role='link'], [role='tab'], [role='menuitem'], label, summary")) return true;
+      if (hasOwnText) return false;
+      let depth = 0;
+      for (let el = element; el && el !== host; el = el.parentElement) depth++;
+      return depth <= 2;
+    };
+
     const withTitle = element.closest("[title]");
-    if (withTitle?.getAttribute("title")?.trim()) {
+    if (describesElement(withTitle) && withTitle.getAttribute("title")?.trim()) {
       return withTitle.getAttribute("title").trim();
     }
 
     const withAria = element.closest("[aria-label]");
-    if (withAria?.getAttribute("aria-label")?.trim()) {
+    if (describesElement(withAria) && withAria.getAttribute("aria-label")?.trim()) {
       return withAria.getAttribute("aria-label").trim();
     }
 
@@ -407,13 +608,13 @@
     if (element.id && typeof CSS !== "undefined" && CSS.escape) {
       try {
         const labelFor = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
-        if (labelFor?.innerText?.trim()) return labelFor.innerText.trim();
+        const labelText = readText(labelFor, 120).trim();
       } catch {}
     }
 
     const interactive = element.closest("button, a, [role='button'], label, summary");
     if (interactive && interactive !== element) {
-      const t = (interactive.innerText || "").trim();
+      const t = readText(interactive, 120).trim();
       if (t && t.length < 80) return t;
     }
 
@@ -423,7 +624,7 @@
         "[role='tooltip'], [data-tooltip-content], .tooltip, [class*='group-hover:opacity-100']"
       );
       if (tip) {
-        const tipText = (tip.innerText || tip.textContent || "").trim();
+        const tipText = readText(tip, 140).trim();
         if (tipText && tipText.length < 100) return tipText;
       }
     }
@@ -434,18 +635,18 @@
   function findNearbyAnchor(element) {
     const prev = element.previousElementSibling;
     if (prev) {
-      const t = shorten(prev.innerText || prev.textContent, 50);
+      const t = shorten(readText(prev, 80), 50);
       if (t) return t;
     }
     const next = element.nextElementSibling;
     if (next) {
-      const t = shorten(next.innerText || next.textContent, 50);
+      const t = shorten(readText(next, 80), 50);
       if (t) return t;
     }
     for (let curr = element.parentElement, depth = 0; curr && depth < 4; curr = curr.parentElement, depth++) {
       const heading = curr.querySelector("h1, h2, h3, h4, h5, h6, legend, [data-slot='card-title'], [role='heading']");
       if (heading && !element.contains(heading)) {
-        const t = shorten(heading.innerText || heading.textContent, 55);
+        const t = shorten(readText(heading, 80), 55);
         if (t) return t;
       }
     }
@@ -542,12 +743,12 @@
       const findById = (id) => root.getElementById?.(id) || document.getElementById(id);
       const labelledBy = (region.getAttribute("aria-labelledby") || "")
         .split(/\s+/)
-        .map((id) => findById(id)?.innerText || findById(id)?.textContent || "")
+        .map((id) => readText(findById(id), 80))
         .filter(Boolean)
         .join(" ");
       const heading = region.querySelector("h1, h2, h3, h4, [role='heading']");
       return shorten(
-        region.getAttribute("aria-label") || region.getAttribute("title") || labelledBy || heading?.innerText || heading?.textContent || "",
+        region.getAttribute("aria-label") || region.getAttribute("title") || labelledBy || readText(heading, 80),
         50
       );
     };
@@ -635,7 +836,7 @@
 
     let directText = "";
     if (tag !== "svg" && element.namespaceURI !== "http://www.w3.org/2000/svg") {
-      directText = shorten(element.innerText || element.textContent, isDetailed ? 110 : 60);
+      directText = shorten(readText(element, 160), isDetailed ? 110 : 60);
     }
 
     const labelOrTooltip = findTooltipText(element);
@@ -651,24 +852,28 @@
     if (primaryLabel) headerTarget += ` "${primaryLabel}"`;
     if (iconHint) headerTarget += ` (icon: ${iconHint})`;
 
-    const lines = [
-      `## Element: ${headerTarget}`,
-      "Task: [Describe_the_change]"
-    ];
+    // No task placeholder: the user writes the request above one or more pasted blocks.
+    const lines = [`## Element: ${headerTarget}`];
 
     const routePath = `${location.pathname || "/"}${location.hash && location.hash.length < 40 ? location.hash : ""}`;
-    if (routePath) {
-      lines.push(`- Page: \`${routePath}\``);
-    }
+    const pageParts = [`- Page: \`${routePath}\``, `Viewport: ${describeViewport()}`];
+    const theme = detectTheme();
+    if (theme) pageParts.push(`Theme: ${theme}`);
+    lines.push(pageParts.join(" | "));
 
     const fw = getFrameworkMetadata(element);
     const section = getSectionContext(element);
     if (fw?.source) {
       lines.push(`- Source: \`${fw.source}\`${fw.component ? ` (${fw.component})` : ""}`);
+      if (fw.definedIn) lines.push(`- Defined in: \`${fw.definedIn}\``);
+      else if (fw.usedIn) lines.push(`- Used in: \`${fw.usedIn}\``);
     } else if (fw?.component && section) {
       lines.push(`- Component: ${fw.component} (${section})`);
     } else if (fw?.component) {
       lines.push(`- Component: ${fw.component}`);
+    }
+    if (fw?.props?.name && fw.props.text) {
+      lines.push(`- Props (${fw.props.name}): ${fw.props.text}`);
     }
 
     lines.push(`- Selector: \`${selector}\``);
@@ -749,14 +954,19 @@
       lines.push(`- Classes: \`${classText}\``);
     }
 
+    const hasText = Boolean(directText) || /^(input|textarea|select)$/.test(tag);
+    lines.push(`- Style: ${describeStyle(element, hasText, isDetailed)}`);
+
     if (isDetailed) {
-      const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
+      const isFlex = /flex/.test(style.display);
       const metrics = [
-        `${Math.round(rect.width)}×${Math.round(rect.height)}px`,
         style.display,
+        isFlex && style.flexDirection !== "row" ? style.flexDirection : null,
+        (isFlex || /grid/.test(style.display)) && style.alignItems !== "normal" ? `align ${style.alignItems}` : null,
+        (isFlex || /grid/.test(style.display)) && style.justifyContent !== "normal" ? `justify ${style.justifyContent}` : null,
         style.position !== "static" ? `${style.position}${style.zIndex && style.zIndex !== "auto" ? ` z=${style.zIndex}` : ""}` : null,
-        Number(style.opacity) < 1 ? `opacity=${style.opacity}` : null
+        style.overflow !== "visible" ? `overflow ${style.overflow}` : null
       ].filter(Boolean);
       lines.push(`- Layout: ${metrics.join(" | ")}`);
 
