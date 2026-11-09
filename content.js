@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SCRIPT_VERSION = "1.8.3";
+  const SCRIPT_VERSION = "1.8.4";
   const PROBE_EVENT = "__vamber_probe__";
   const PROBE_ATTR = "data-vamber-probe";
   const SUPERSEDE_EVENT = "__vamber_supersede__";
@@ -321,8 +321,8 @@
 
   const DEFAULTS = { detail: "compact" };
   const FLASH_MS = 500;
-  const DELETE_TASK_PROMPT =
-    "Task: Remove this element from the UI. Delete its JSX/HTML node in the source component and clean up any props, state, handlers, imports, or styles that become unused as a result, without breaking sibling layout.";
+  const DELETE_TASK_TEXT =
+    "Remove this element from the UI. Delete its JSX/HTML node in the source component and clean up any props, state, handlers, imports, or styles that become unused as a result, without breaking sibling layout.";
   let settings = {
     detail: document.documentElement?.getAttribute(DETAIL_ATTR) || DEFAULTS.detail
   };
@@ -831,7 +831,7 @@
     return rawElement;
   }
 
-  function getElementContext(element) {
+  function getElementContext(element, taskText = "[Describe_the_change]") {
     const currentDetail = document.documentElement?.getAttribute(DETAIL_ATTR) || settings.detail;
     const isDetailed = currentDetail === "detailed";
     const tag = element.tagName.toLowerCase();
@@ -855,8 +855,10 @@
     if (primaryLabel) headerTarget += ` "${primaryLabel}"`;
     if (iconHint) headerTarget += ` (icon: ${iconHint})`;
 
-    // No task placeholder: the user writes the request above one or more pasted blocks.
-    const lines = [`## Element: ${headerTarget}`];
+    const lines = [
+      `## Element: ${headerTarget}`,
+      `Task: ${taskText}`
+    ];
 
     const routePath = `${location.pathname || "/"}${location.hash && location.hash.length < 40 ? location.hash : ""}`;
     const pageParts = [`- Page: \`${routePath}\``, `Viewport: ${describeViewport()}`];
@@ -1125,6 +1127,12 @@
     return event.code === "KeyD" || (typeof event.key === "string" && event.key.toLowerCase() === "d");
   }
 
+  function isEditableTarget(node) {
+    const el = node instanceof Element ? node : document.activeElement;
+    if (!el) return false;
+    return Boolean(el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+  }
+
   function updateHoverColor() {
     if (hoverOverlay?._vamberFrame) {
       hoverOverlay._vamberFrame.style.borderColor = deleteKeyHeld ? "#f43f5e" : "#22d3ee";
@@ -1165,8 +1173,7 @@
   async function selectElement(element, options = {}) {
     if (!element) return;
     clearHover();
-    const baseContext = getElementContext(element);
-    const context = options.taskPrompt ? `${options.taskPrompt}\n\n${baseContext}` : baseContext;
+    const context = getElementContext(element, options.taskText || "[Describe_the_change]");
     try {
       await copyText(context);
       flashSuccess(element, options.flashColor || "#22c55e");
@@ -1179,7 +1186,7 @@
 
   document.addEventListener("mousemove", (event) => {
     pointer = { x: event.clientX, y: event.clientY };
-    if (event.altKey) {
+    if (event.shiftKey) {
       const element = getEventElement(event);
       const overlay = findTransparentOverlay(event.clientX, event.clientY, element);
       const target = resolveTargetElement(overlay || element);
@@ -1191,14 +1198,16 @@
   }, { capture: true, signal });
 
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Alt") {
+    if (event.key === "Shift") {
+      if (isEditableTarget(event.target)) return;
       const target = resolvePointerTarget();
       if (target) showHover(target);
       return;
     }
-    if (isKeyD(event) && !event.ctrlKey && !event.metaKey) {
+    if (isKeyD(event) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (event.shiftKey && isEditableTarget(event.target) && !hoveredElement) return;
       deleteKeyHeld = true;
-      if (event.altKey) {
+      if (event.shiftKey) {
         event.preventDefault();
         const target = resolvePointerTarget();
         if (target) showHover(target);
@@ -1213,7 +1222,7 @@
   }, { capture: true, signal });
 
   window.addEventListener("keyup", (event) => {
-    if (event.key === "Alt") {
+    if (event.key === "Shift") {
       deleteKeyHeld = false;
       clearHover();
     } else if (isKeyD(event)) {
@@ -1229,8 +1238,13 @@
   window.addEventListener("scroll", refreshIndicators, { capture: true, signal });
   window.addEventListener("resize", refreshIndicators, { capture: true, signal });
 
+  document.addEventListener("mousedown", (event) => {
+    if (!event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+  }, { capture: true, signal });
+
   document.addEventListener("click", (event) => {
-    if (!event.altKey || event.button !== 0) return;
+    if (!event.shiftKey || event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
@@ -1240,7 +1254,7 @@
     if (deleteKeyHeld) {
       deleteKeyHeld = false;
       void selectElement(resolved, {
-        taskPrompt: DELETE_TASK_PROMPT,
+        taskText: DELETE_TASK_TEXT,
         flashColor: "#f43f5e",
         toastTitle: "Copied delete task",
         toastMessage: "Remove-element task is ready to paste."

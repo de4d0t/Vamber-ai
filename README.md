@@ -10,9 +10,9 @@ Pick an element on a live webpage and copy focused, AI-ready UI context to your 
 
 ## Features
 
-- **Alt + Left Click**: Instantly copy structured, token-efficient UI context (page route, viewport breakpoint & theme, React/Vue/Svelte component, usage-site source file, component props, clean CSS selector, and current computed styles).
-- **Alt + D + Left Click**: Hold `Alt + D` (outline turns rose-red) and left-click an element to copy its context pre-filled with a clean, AI-ready instruction to remove the element and clean up unused code.
-- **Live Hover Preview**: Hold **Alt** to outline elements in cyan before selecting (`Esc` to dismiss).
+- **Shift + Left Click**: Instantly copy structured, token-efficient UI context (page route, viewport breakpoint & theme, React/Vue/Svelte component, usage-site source file, component props, clean CSS selector, and current computed styles).
+- **Shift + D + Left Click**: Hold `Shift + D` (outline turns rose-red) and left-click an element to copy its context pre-filled with a clean, AI-ready instruction to remove the element and clean up unused code.
+- **Live Hover Preview**: Hold **Shift** to outline elements in cyan before selecting (`Esc` to dismiss).
 - **Compact & Detailed Modes**: Toggle between lightweight context and full DOM/attribute details.
 - **Visual Feedback**: Immediate flash and toast notification upon copying to clipboard.
 - **Update Alerts & Auto-Sync**: Automatic toolbar badge notification, OTA `content.js` sync from GitHub, and an in-popup **Reload** button.
@@ -31,14 +31,15 @@ To load a newer downloaded version, replace the extension files and click the **
 
 ## Use it
 
-1. Hold **Alt** and move the pointer over the target to preview it.
-2. Keep holding **Alt** and left-click to copy the context—or hold **Alt + D** and left-click to copy the context with a ready-made "Remove this element" task.
+1. Hold **Shift** and move the pointer over the target to preview it.
+2. Keep holding **Shift** and left-click to copy the context (replacing `Task: [Describe_the_change]` with your requested change)—or hold **Shift + D** and left-click to automatically fill `Task:` with a ready-made instruction to remove the element and clean up unused code.
 3. Choose **Compact** or **Detailed** in the popup to control how much context is copied.
 
 ### What the agent receives
 
 ```
 ## Element: button "Save changes"
+Task: [Describe_the_change]
 - Page: `/settings` | Viewport: 1280px (xl) | Theme: dark
 - Source: `src/app/settings/settings-form.tsx:88` (SettingsPage > SettingsForm > Button)
 - Defined in: `src/components/ui/button.tsx:45`
