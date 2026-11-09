@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SCRIPT_VERSION = "1.8.9";
+  const SCRIPT_VERSION = "1.9.0";
   const PROBE_EVENT = "__vamber_probe__";
   const PROBE_ATTR = "data-vamber-probe";
   const SUPERSEDE_EVENT = "__vamber_supersede__";
@@ -1231,7 +1231,7 @@
       ? (count > 1 ? `Appended element (#${count})` : "Added element (#1)")
       : (options.toastTitle || "");
     const toastMessage = options.append
-      ? `${count} ${count === 1 ? "element" : "elements"} in clipboard (Shift+Esc to clear).`
+      ? `${count} ${count === 1 ? "element" : "elements"} in clipboard (Shift+R to clear).`
       : (options.toastMessage || "");
 
     try {
@@ -1280,14 +1280,25 @@
       }
       return;
     }
+    if (
+      event.shiftKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.repeat &&
+      (event.code === "KeyR" || (typeof event.key === "string" && event.key.toLowerCase() === "r"))
+    ) {
+      if (isEditableTarget(event.target) && !hoveredElement && !copiedBatch.length) return;
+      event.preventDefault();
+      activeActionKey = "";
+      clearHover();
+      clearBatch();
+      showToast(true, "Multi-select reset", "Cleared selected elements. Ready from #1.");
+      return;
+    }
     if (event.key === "Escape") {
       activeActionKey = "";
       clearHover();
-      if (event.shiftKey) {
-        event.preventDefault();
-        clearBatch();
-        showToast(true, "Multi-select reset", "Cleared selected elements. Ready from #1.");
-      }
     }
   }, { capture: true, signal });
 
