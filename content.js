@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SCRIPT_VERSION = "1.8.5";
+  const SCRIPT_VERSION = "1.8.6";
   const PROBE_EVENT = "__vamber_probe__";
   const PROBE_ATTR = "data-vamber-probe";
   const SUPERSEDE_EVENT = "__vamber_supersede__";
@@ -840,7 +840,7 @@
     return rawElement;
   }
 
-  function getElementContext(element, taskText = "[Describe_the_change]") {
+  function getElementContext(element, taskText = "[ __________ ]") {
     const currentDetail = document.documentElement?.getAttribute(DETAIL_ATTR) || settings.detail;
     const isDetailed = currentDetail === "detailed";
     const tag = element.tagName.toLowerCase();
@@ -1201,7 +1201,7 @@
   function formatBatchContext(batch) {
     if (batch.length === 1) return batch[0].rawContext;
     const firstPage = batch[0].pageLine;
-    const blocks = [`Task: ${batch[0].taskText || "[Describe_the_change]"}`];
+    const blocks = [`Task: ${batch[0].taskText || "[ __________ ]"}`];
     batch.forEach((entry, idx) => {
       const itemLines = [`## Element ${idx + 1}: ${entry.headerTarget}`];
       if (entry.pageLine && (idx === 0 || entry.pageLine !== firstPage)) {
@@ -1216,7 +1216,7 @@
   async function selectElement(element, options = {}) {
     if (!element) return;
     clearHover();
-    const taskText = options.taskText || "[Describe_the_change]";
+    const taskText = options.taskText || "[ __________ ]";
     const rawContext = getElementContext(element, taskText);
     const entry = parseContextEntry(rawContext, taskText);
 

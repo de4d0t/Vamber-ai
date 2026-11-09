@@ -34,14 +34,14 @@ To load a newer downloaded version, replace the extension files and click the **
 ## Use it
 
 1. Hold **Shift** and move the pointer over the target to preview it.
-2. Keep holding **Shift** and left-click to copy the context (replacing `Task: [Describe_the_change]` with your requested change)—or hold **Shift + D** and left-click to automatically fill `Task:` with a ready-made instruction to remove the element and clean up unused code.
+2. Keep holding **Shift** and left-click to copy the context (replacing `Task: [ __________ ]` with your requested change)—or hold **Shift + D** and left-click to automatically fill `Task:` with a ready-made instruction to remove the element and clean up unused code.
 3. Choose **Compact** or **Detailed** in the popup to control how much context is copied.
 
 ### What the agent receives
 
 ```
 ## Element: button "Save changes"
-Task: [Describe_the_change]
+Task: [ __________ ]
 - Page: `/settings` | Viewport: 1280px (xl) | Theme: dark
 - Source: `src/app/settings/settings-form.tsx:88` (SettingsPage > SettingsForm > Button)
 - Defined in: `src/components/ui/button.tsx:45`
