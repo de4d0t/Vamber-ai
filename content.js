@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SCRIPT_VERSION = "1.8.6";
+  const SCRIPT_VERSION = "1.8.7";
   const PROBE_EVENT = "__vamber_probe__";
   const PROBE_ATTR = "data-vamber-probe";
   const SUPERSEDE_EVENT = "__vamber_supersede__";
