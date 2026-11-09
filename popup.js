@@ -41,15 +41,14 @@ function handleSingleButtonAction() {
   const isUpdatePending = updateButton.classList.contains("available");
   updateButton.classList.add("checking");
   updateButton.disabled = true;
-  showTemporaryStatus(isUpdatePending ? "Updating directly from GitHub…" : "Checking GitHub & reloading…", 0);
+  showTemporaryStatus(isUpdatePending ? "Updating directly from GitHub…" : "Checking GitHub for updates…", 0);
 
   chrome.runtime.sendMessage({ type: "APPLY_GITHUB_UPDATE" }, (result) => {
     updateButton.classList.remove("checking");
     updateButton.disabled = false;
 
     if (chrome.runtime.lastError) {
-      showTemporaryStatus("Reloading extension…", 1000);
-      window.setTimeout(() => chrome.runtime.reload(), 150);
+      showTemporaryStatus("Update checker is unavailable");
       return;
     }
 
@@ -66,8 +65,12 @@ function handleSingleButtonAction() {
       return;
     }
 
-    showTemporaryStatus(`Up to date (v${result?.activeVersion || manifestVersion}) · Reloading…`, 1200);
-    window.setTimeout(() => chrome.runtime.reload(), 350);
+    if (result?.status === "error") {
+      showTemporaryStatus("Could not reach GitHub right now");
+      return;
+    }
+
+    showTemporaryStatus(`Up to date (v${result?.activeVersion || manifestVersion})`);
   });
 }
 
@@ -118,6 +121,6 @@ function renderUpdateStatus(result) {
     return;
   }
 
-  updateButton.title = `Vamber AI v${displayedVersion} is up to date. Click to check updates & reload.`;
+  updateButton.title = `Vamber AI v${displayedVersion} is up to date. Click to check for updates.`;
   updateButton.setAttribute("aria-label", updateButton.title);
 }
